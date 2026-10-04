@@ -1,0 +1,62 @@
+# ClipForge API + worker image.
+#
+# One image serves both roles (`uvicorn` for the API, `app.workers.worker` for
+# the worker) so they can never drift apart, and `docker compose` scales them
+# independently.
+#
+# Build context is the repository root (see docker-compose.yml), so paths below
+# are repo-relative.
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# FFmpeg is installed for real here (apt is unavailable in some sandboxes, but a
+# Docker build has it). libgl1 + libglib2.0-0 satisfy OpenCV's shared-library
+# needs even in the headless build; fonts-dejavu supplies the caption fonts.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        curl \
+        libgl1 \
+        libglib2.0-0 \
+        fonts-dejavu-core \
+        fonts-dejavu-extra \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv/app
+
+# Dependency layer first: requirements change far less often than source.
+COPY apps/api/requirements.txt /srv/app/requirements.txt
+RUN pip install --no-cache-dir -r /srv/app/requirements.txt
+
+COPY apps/api/app /srv/app/apps/api/app
+
+# `app` resolves from here; `scripts/` is copied for the type checker, which the
+# API container does not need at runtime but keeps the image self-contained.
+COPY scripts /srv/app/scripts
+
+# Non-root runtime user; the media work directories are the only writable paths.
+RUN useradd --create-home --shell /bin/bash clipforge \
+    && mkdir -p /srv/app/.data/storage /srv/app/.data/work /srv/app/.data/uploads \
+    && chown -R clipforge:clipforge /srv/app
+USER clipforge
+
+ENV PYTHONPATH=/srv/app/apps/api \
+    DATABASE_URL=postgresql+psycopg://clipforge:clipforge@postgres:5432/clipforge \
+    REDIS_URL=redis://redis:6379/0 \
+    STORAGE_LOCAL_ROOT=/srv/app/.data/storage \
+    WORKER_INLINE=false \
+    MEDIA_FFMPEG_PATH=/usr/bin/ffmpeg \
+    MEDIA_FFPROBE_PATH=/usr/bin/ffprobe \
+    FONT_DIRECTORY=/usr/share/fonts
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
+
+# The command is overridden by compose for the worker role.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

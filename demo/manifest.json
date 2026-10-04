@@ -1,0 +1,297 @@
+{
+  "generator": "scripts/make_demo_asset.py",
+  "voice": "espeak-ng:en@166wpm",
+  "audio": {
+    "path": "/tmp/clipforge-demo-qr77gmgm/narration.wav",
+    "channels": 1,
+    "sample_rate": 22050,
+    "duration": 143.9
+  },
+  "narration": {
+    "duration": 143.9,
+    "sentences": [
+      {
+        "section": "The finishing problem",
+        "sentence": "Most solo developers do not have a shipping problem. They have a finishing problem.",
+        "start": 0.0,
+        "end": 4.668
+      },
+      {
+        "section": "The finishing problem",
+        "sentence": "You start with a plan that feels reasonable: twelve features, three integrations, a landing page, and a launch date.",
+        "start": 4.988,
+        "end": 11.972
+      },
+      {
+        "section": "The finishing problem",
+        "sentence": "Six weeks later the code still runs on your machine, and nobody has ever paid you a dollar.",
+        "start": 12.292,
+        "end": 17.843
+      },
+      {
+        "section": "The finishing problem",
+        "sentence": "Here is the uncomfortable truth. Nobody cares about your feature list. They care about one problem you solve well.",
+        "start": 18.163,
+        "end": 24.767
+      },
+      {
+        "section": "The finishing problem",
+        "sentence": "The fix is not discipline. The fix is deciding what you will not build before you write the first line.",
+        "start": 25.087,
+        "end": 30.802
+      },
+      {
+        "section": "The finishing problem",
+        "marker": "section_end",
+        "at": 32.222,
+        "section_start": 0.0,
+        "section_end": 32.222
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "I want you to write down the one sentence you would say to a customer to explain your product.",
+        "start": 32.222,
+        "end": 37.456
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "If that sentence needs a comma and the word and, it is too big. Delete the second half.",
+        "start": 37.776,
+        "end": 43.07
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "Now build only what that sentence promises, and put it online where real people can reach it.",
+        "start": 43.39,
+        "end": 48.902
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "My first useful version took nine days. It had one button, one form, and no settings page at all.",
+        "start": 49.222,
+        "end": 56.148
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "It made four hundred dollars that month, which is not a business, but it was proof that strangers would pay.",
+        "start": 56.468,
+        "end": 62.302
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "sentence": "That proof changed every decision I made after it, and no amount of planning would have given it to me.",
+        "start": 62.622,
+        "end": 68.007
+      },
+      {
+        "section": "Ship the smallest useful thing",
+        "marker": "section_end",
+        "at": 69.427,
+        "section_start": 32.222,
+        "section_end": 69.427
+      },
+      {
+        "section": "Feedback loops beat features",
+        "sentence": "The most valuable asset in a young product is not code. It is the speed of your feedback loop.",
+        "start": 69.427,
+        "end": 74.661
+      },
+      {
+        "section": "Feedback loops beat features",
+        "sentence": "Every week you want one real conversation with someone who used the thing you shipped.",
+        "start": 74.981,
+        "end": 79.604
+      },
+      {
+        "section": "Feedback loops beat features",
+        "sentence": "Ask what they tried to do, where they hesitated, and what they did instead when it failed.",
+        "start": 79.924,
+        "end": 85.48
+      },
+      {
+        "section": "Feedback loops beat features",
+        "sentence": "You will hear the same complaint three times before you are allowed to fix it, because the first two times it is noise.",
+        "start": 85.8,
+        "end": 92.14
+      },
+      {
+        "section": "Feedback loops beat features",
+        "sentence": "When the third person says it, you stop being clever and you make the change that removes the whole problem.",
+        "start": 92.46,
+        "end": 98.342
+      },
+      {
+        "section": "Feedback loops beat features",
+        "marker": "section_end",
+        "at": 99.762,
+        "section_start": 69.427,
+        "section_end": 99.762
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "Around month three, growth stops being about the product and starts being about the engine around it.",
+        "start": 99.762,
+        "end": 105.255
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "That engine is boring: a landing page that converts, a churn email, an onboarding step, and a payment flow that never breaks.",
+        "start": 105.575,
+        "end": 113.032
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "Automate the parts you do more than twice a week. Ignore the parts you do once a quarter.",
+        "start": 113.352,
+        "end": 119.401
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "Track four numbers: signups, activation rate, weekly retention, and revenue. Everything else is a distraction.",
+        "start": 119.721,
+        "end": 127.083
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "When activation goes up, you scale acquisition. When retention drops, you stop selling and fix the product.",
+        "start": 127.403,
+        "end": 134.949
+      },
+      {
+        "section": "Build the boring engine",
+        "sentence": "That is the whole game. Ship the smallest useful thing, talk to the people who use it, and let the boring engine compound.",
+        "start": 135.269,
+        "end": 142.48
+      },
+      {
+        "section": "Build the boring engine",
+        "marker": "section_end",
+        "at": 143.9,
+        "section_start": 99.762,
+        "section_end": 143.9
+      }
+    ],
+    "audio_levels": {
+      "peak": 31282.0,
+      "rms": 24.17,
+      "samples": 3172990
+    }
+  },
+  "script": "Most solo developers do not have a shipping problem. They have a finishing problem. You start with a plan that feels reasonable: twelve features, three integrations, a landing page, and a launch date. Six weeks later the code still runs on your machine, and nobody has ever paid you a dollar. Here is the uncomfortable truth. Nobody cares about your feature list. They care about one problem you solve well. The fix is not discipline. The fix is deciding what you will not build before you write the first line. I want you to write down the one sentence you would say to a customer to explain your product. If that sentence needs a comma and the word and, it is too big. Delete the second half. Now build only what that sentence promises, and put it online where real people can reach it. My first useful version took nine days. It had one button, one form, and no settings page at all. It made four hundred dollars that month, which is not a business, but it was proof that strangers would pay. That proof changed every decision I made after it, and no amount of planning would have given it to me. The most valuable asset in a young product is not code. It is the speed of your feedback loop. Every week you want one real conversation with someone who used the thing you shipped. Ask what they tried to do, where they hesitated, and what they did instead when it failed. You will hear the same complaint three times before you are allowed to fix it, because the first two times it is noise. When the third person says it, you stop being clever and you make the change that removes the whole problem. Around month three, growth stops being about the product and starts being about the engine around it. That engine is boring: a landing page that converts, a churn email, an onboarding step, and a payment flow that never breaks. Automate the parts you do more than twice a week. Ignore the parts you do once a quarter. Track four numbers: signups, activation rate, weekly retention, and revenue. Everything else is a distraction. When activation goes up, you scale acquisition. When retention drops, you stop selling and fix the product. That is the whole game. Ship the smallest useful thing, talk to the people who use it, and let the boring engine compound.",
+  "faces": [
+    {
+      "image": "presenter_1.jpg",
+      "faces": 1,
+      "boxes": [
+        {
+          "x": 607,
+          "y": 135,
+          "w": 190,
+          "h": 190
+        }
+      ]
+    },
+    {
+      "image": "presenter_2.jpg",
+      "faces": 4,
+      "boxes": [
+        {
+          "x": 959,
+          "y": 17,
+          "w": 67,
+          "h": 67
+        },
+        {
+          "x": 814,
+          "y": 116,
+          "w": 216,
+          "h": 216
+        },
+        {
+          "x": 1179,
+          "y": 234,
+          "w": 75,
+          "h": 75
+        },
+        {
+          "x": 206,
+          "y": 244,
+          "w": 84,
+          "h": 84
+        }
+      ]
+    },
+    {
+      "image": "presenter_3.jpg",
+      "faces": 2,
+      "boxes": [
+        {
+          "x": 404,
+          "y": 118,
+          "w": 151,
+          "h": 151
+        },
+        {
+          "x": 1167,
+          "y": 37,
+          "w": 158,
+          "h": 158
+        }
+      ]
+    },
+    {
+      "image": "presenter_4.jpg",
+      "faces": 1,
+      "boxes": [
+        {
+          "x": 682,
+          "y": 114,
+          "w": 294,
+          "h": 294
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "title": "The finishing problem",
+      "start": 0.0,
+      "end": 32.222
+    },
+    {
+      "title": "Ship the smallest useful thing",
+      "start": 32.222,
+      "end": 69.427
+    },
+    {
+      "title": "Feedback loops beat features",
+      "start": 69.427,
+      "end": 99.762
+    },
+    {
+      "title": "Build the boring engine",
+      "start": 99.762,
+      "end": 143.9
+    }
+  ],
+  "master": "/home/user/ClipForge/demo/creator_masterclass.mp4",
+  "master_bytes": 10400269,
+  "master_audio_levels": {
+    "peak": 0.859,
+    "rms": 0.1335,
+    "peak_dbfs": -1.3,
+    "rms_dbfs": -17.5,
+    "samples": 6346752,
+    "streams": 1
+  },
+  "video_duration_target": 145.1,
+  "video": {
+    "duration": 143.9,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "bytes": 10400269
+  }
+}
