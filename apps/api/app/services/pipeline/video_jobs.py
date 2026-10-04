@@ -11,6 +11,7 @@ from app.models import Job, Project, ProjectStatus, Video, VideoStatus
 from app.services.job_service import JobService
 from app.services.media import ffmpeg
 from app.services.pipeline.workspace import workspace_for
+from app.services.processor import sidecar
 from app.services.storage import get_storage
 
 log = get_logger(__name__)
@@ -32,7 +33,10 @@ def run_probe(db: Session, job: Job) -> dict:
         local = storage.materialize(video.storage_key, workdir)
         JobService.check_cancelled(db, job)
 
-        probe = ffmpeg.probe_media(local)
+        # Prefer the Rust sidecar when it is configured and reachable; it returns
+        # the same normalized shape (validated in services/processor.py), so this
+        # is a pure speed-up and never a functional dependency.
+        probe = sidecar.probe_media(local) or ffmpeg.probe_media(local)
         if probe["duration"] <= 0:
             raise MediaError("This file reports no duration and cannot be processed.", code="invalid_media")
 

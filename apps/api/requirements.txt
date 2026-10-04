@@ -44,3 +44,5 @@ pytest==9.1.1
 # pytest-asyncio is only needed for the async websocket tests
 pytest-asyncio==1.4.0
 httpx==0.28.1                       # ASGI transport for API tests
+# Parses docker-compose.yml and .env.example in test_deployment.py
+PyYAML==6.0.2

@@ -147,14 +147,25 @@ def healthcheck() -> dict[str, Any]:
 
 # ------------------------------------------------------------- capabilities ---
 def probe_media(path: Path) -> dict[str, Any] | None:
-    """Fast probe through the sidecar; ``None`` means "use the Python path"."""
+    """Probe through the sidecar; ``None`` means "use the Python path".
+
+    The response is coerced with the same normalizer the Python prober uses, so
+    a stale or partial sidecar cannot leak an unexpected shape into the pipeline;
+    anything that fails validation simply falls back.
+    """
     result = call("probe", {"path": str(path)})
     if not result.ok:
         return None
-    streams = result.data.get("streams") or {}
-    if not result.data.get("duration") and not streams:
+    payload = result.data.get("data") if isinstance(result.data.get("data"), dict) else result.data
+    if not isinstance(payload, dict) or (not payload.get("duration") and not payload.get("streams")):
         return None
-    return result.data
+    from app.services.media.ffmpeg import normalize_probe  # local: keeps this module lightweight
+
+    normalized = normalize_probe(payload)
+    if normalized["duration"] <= 0:
+        return None
+    normalized["strategy"] = "processor"
+    return normalized
 
 
 def waveform(path: Path, buckets: int = 400) -> list[float] | None:
@@ -188,3 +199,23 @@ def sample_frames(
     if not frames:
         return None
     return list(frames)
+
+
+class _SidecarModule:
+    """`from app.services.processor import sidecar` — an explicit, readable alias.
+
+    The module is named `processor`, which collides with nothing today but reads
+    ambiguously at call sites (`processor.probe_media(...)` looks local). Importing
+    it as `sidecar` makes the optional, remote nature obvious in every caller.
+    """
+
+    probe_media = staticmethod(probe_media)
+    waveform = staticmethod(waveform)
+    sample_frames = staticmethod(sample_frames)
+    healthcheck = staticmethod(healthcheck)
+    info = staticmethod(info)
+    call = staticmethod(call)
+    enabled = staticmethod(enabled)
+
+
+sidecar = _SidecarModule()

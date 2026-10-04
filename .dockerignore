@@ -1,0 +1,22 @@
+# Root build context (API + worker image): exclude everything not needed.
+.git/
+.venv/
+.data/
+node_modules/
+apps/web/node_modules/
+apps/web/dist/
+apps/web/Dockerfile
+apps/processor/
+demo/*.mp4
+demo/*.wav
+demo/.cache/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+*.log
+e2e/test-results/
+e2e/playwright-report/

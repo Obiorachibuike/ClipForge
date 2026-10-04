@@ -54,6 +54,9 @@ class TranscriptStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    # Replaced by a newer run (e.g. the narration script changed). Kept for audit
+    # and excluded from "current transcript" lookups.
+    SUPERSEDED = "superseded"
 
 
 class CandidateStatus(StrEnum):

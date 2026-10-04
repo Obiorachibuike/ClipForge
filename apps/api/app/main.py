@@ -292,6 +292,15 @@ def readyz() -> JSONResponse:
         checks["ffmpeg"] = False
         healthy = False
 
+    # The Rust processor is optional: report whether it is reachable, but never
+    # degrade readiness over it — the Python pipeline covers every command.
+    from app.services.processor import sidecar
+
+    try:
+        checks["processor"] = sidecar.healthcheck()
+    except Exception as exc:
+        checks["processor"] = {"enabled": False, "reachable": False, "detail": type(exc).__name__}
+
     return JSONResponse(status_code=200 if healthy else 503, content={"status": "ok" if healthy else "degraded", "checks": checks})
 
 

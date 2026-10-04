@@ -223,7 +223,11 @@ def create_manual_clip(project_id: str, payload: ClipCreate, db: DbSession, user
 @router.get("/clips/{clip_id}", response_model=ClipDetail)
 def read_clip(clip_id: str, db: DbSession, user: CurrentUser) -> ClipDetail:
     clip = owned_clip(db, user, clip_id)
-    detail = ClipDetail.model_validate(clip)
+    # Validate only the scalar clip fields first. ClipDetail.video is a dict,
+    # while the ORM relationship is a `Video` object; validating `clip` against
+    # the richer schema directly therefore raises before we can serialize the
+    # relationship below.
+    detail = ClipDetail.model_validate(ClipOut.model_validate(clip).model_dump())
     video = db.get(Video, clip.video_id)
     if video is not None:
         detail.video = VideoOut.model_validate(video).model_dump()

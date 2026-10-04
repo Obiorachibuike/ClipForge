@@ -322,7 +322,12 @@ def probe_media(path: Path) -> dict[str, Any]:
     raise MediaError("This file could not be read as a video or audio file.", code="media_unreadable")
 
 
-def _normalize_probe(data: dict[str, Any]) -> dict[str, Any]:
+def normalize_probe(data: dict[str, Any]) -> dict[str, Any]:
+    """Coerce a probe document into the canonical shape used across the app.
+
+    Public because the Rust sidecar's output is passed through it too, which is
+    what lets either implementation answer without callers caring.
+    """
     duration = float(data.get("duration") or 0.0)
     return {
         "duration": duration,
@@ -403,7 +408,7 @@ def _probe_with_pyav(path: Path) -> dict[str, Any]:
                 data["fps"] = float(frames) / float(data["duration"])
         width, height = _apply_rotation(int(data.get("width") or 0), int(data.get("height") or 0), int(data.get("rotation") or 0))
         data["width"], data["height"] = width, height
-        return _normalize_probe(data)
+        return normalize_probe(data)
 
 
 def _probe_with_ffprobe(path: Path) -> dict[str, Any]:
@@ -471,7 +476,7 @@ def _probe_with_ffprobe(path: Path) -> dict[str, Any]:
         data["duration"] = float(data.get("duration") or 0.0)
     width, height = _apply_rotation(int(data.get("width") or 0), int(data.get("height") or 0), int(data.get("rotation") or 0))
     data["width"], data["height"] = width, height
-    return _normalize_probe(data)
+    return normalize_probe(data)
 
 
 def _probe_with_ffmpeg(path: Path) -> dict[str, Any]:
@@ -503,7 +508,7 @@ def _probe_with_ffmpeg(path: Path) -> dict[str, Any]:
         data["has_audio"] = True
     if not data.get("duration"):
         raise MediaError("Unable to determine media duration.", code="media_unreadable")
-    return _normalize_probe(data)
+    return normalize_probe(data)
 
 
 # ------------------------------------------------------------------ helpers ---

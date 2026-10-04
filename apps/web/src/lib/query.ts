@@ -45,6 +45,7 @@ export const queryKeys = {
   projectTranscript: (id: string) => ['project', id, 'transcript'] as const,
   projectFraming: (id: string) => ['project', id, 'framing'] as const,
   transcript: (id: string) => ['transcript', id] as const,
+  videoScript: (videoId: string) => ['video', videoId, 'narration-script'] as const,
   transcriptWindow: (id: string, start: number, end: number) => ['transcript', id, 'window', start, end] as const,
   candidates: (projectId: string, params?: Record<string, unknown>) =>
     ['project', projectId, 'candidates', params ?? {}] as const,

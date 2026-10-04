@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, PageParams, owned_clip, owned_project, owned_render
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import ConflictError, NotFoundError, StorageError
 from app.core.logging import get_logger
 from app.models import (
     Clip,
@@ -94,6 +94,66 @@ def project_renders(
         stmt.order_by(RenderJob.created_at.desc()).limit(params.limit).offset(params.offset)
     ).scalars()
     return Page.build([RenderOut.model_validate(row) for row in rows], total, params.limit, params.offset)
+
+
+@router.get("/renders/{render_id}/download")
+def download_render(
+    render_id: str,
+    db: DbSession,
+    user: CurrentUser,
+    range_header: str | None = Header(default=None, alias="Range"),
+    attachment: bool = Query(default=True),
+) -> Response:
+    """Serve the rendered MP4.
+
+    Supports range requests so the browser player can seek, and is the same file
+    the export pipeline promotes — no separate copy, no placeholder bytes.
+    """
+    render = owned_render(db, user, render_id)
+    if render.status != RenderStatus.SUCCEEDED.value or not render.storage_key:
+        raise ConflictError("This render has not finished yet.", code="render_not_ready")
+
+    storage = get_storage()
+    try:
+        info = storage.stat(render.storage_key)
+    except (FileNotFoundError, StorageError) as exc:
+        log.warning("render.file_missing", render_id=render.id, key=render.storage_key, error=str(exc))
+        raise NotFoundError("The rendered file is no longer available.", code="render_file_missing") from exc
+
+    byte_range: RangeSpec | None = None
+    if range_header and range_header.startswith("bytes="):
+        try:
+            spec = range_header[6:].split("-", 1)
+            start = int(spec[0]) if spec[0] else 0
+            end = int(spec[1]) if len(spec) > 1 and spec[1] else info.size - 1
+            end = min(end, info.size - 1)
+            if 0 <= start <= end:
+                byte_range = RangeSpec(start=start, end=end)
+        except ValueError:
+            byte_range = None
+
+    clip = db.get(Clip, render.clip_id)
+    stem = (clip.title if clip and clip.title else f"clip-{render.clip_id[:8]}").strip() or "clip"
+    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "-" for ch in stem).strip()[:80] or "clip"
+    filename = f"{safe} {render.width}x{render.height}.mp4"
+
+    headers = {
+        "Content-Type": "video/mp4",
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'{"attachment" if attachment else "inline"}; filename="{filename}"',
+        "Cache-Control": "private, max-age=300",
+    }
+    status_code = 200
+    if byte_range is not None:
+        headers["Content-Range"] = f"bytes {byte_range.start}-{byte_range.end}/{info.size}"
+        headers["Content-Length"] = str(byte_range.length)
+        status_code = 206
+    else:
+        headers["Content-Length"] = str(info.size)
+
+    return StreamingResponse(
+        storage.open_stream(render.storage_key, byte_range), status_code=status_code, headers=headers
+    )
 
 
 @router.get("/renders/{render_id}", response_model=RenderOut)

@@ -58,7 +58,16 @@ export interface Video {
   storage_key: string;
   error_message: string;
   probe: Record<string, unknown>;
+  has_narration_script: boolean;
   created_at: string;
+}
+
+export interface NarrationScript {
+  video_id: string;
+  narration_script: string;
+  has_narration_script: boolean;
+  character_count: number;
+  word_count: number;
 }
 
 export interface Job {

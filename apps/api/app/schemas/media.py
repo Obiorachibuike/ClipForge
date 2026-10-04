@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import ORMModel
 
@@ -60,6 +60,14 @@ class ProjectSummary(ProjectOut):
 
 # ------------------------------------------------------------------ videos ---
 class VideoOut(ORMModel):
+    """Video metadata.
+
+    The narration script itself is deliberately excluded: it can be long, and
+    every list endpoint returns this model. `has_narration_script` is enough for
+    the UI to show its state; the text is fetched on demand from
+    `GET /videos/{id}/narration-script`.
+    """
+
     id: str
     project_id: str
     original_filename: str
@@ -78,10 +86,39 @@ class VideoOut(ORMModel):
     error_message: str = ""
     created_at: datetime
     probe: dict[str, Any] = Field(default_factory=dict)
+    has_narration_script: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_script_flag(cls, data: Any) -> Any:
+        """Populate the flag from the ORM object without leaking the script text."""
+        script = getattr(data, "narration_script", None)
+        if script is None and isinstance(data, dict):
+            script = data.get("narration_script")
+        if script is None:
+            return data
+        flag = bool(str(script).strip())
+        if isinstance(data, dict):
+            return {**data, "has_narration_script": flag}
+        # An ORM instance: hand Pydantic a mapping rather than mutating the model.
+        return {**{k: getattr(data, k) for k in VideoOut.model_fields if k != "has_narration_script"}, "has_narration_script": flag}
+
+
+class NarrationScriptOut(BaseModel):
+    """The stored script, fetched only when the editor asks for it."""
+
+    video_id: str
+    narration_script: str
+    has_narration_script: bool
+    character_count: int
+    word_count: int
 
 
 class VideoUpdate(BaseModel):
     original_filename: str | None = Field(default=None, max_length=400)
+    # Optional narration script. When present, transcription aligns the script to
+    # the audio (real DTW word timings) instead of requiring ASR model weights.
+    narration_script: str | None = Field(default=None, max_length=200_000)
 
 
 class UploadInitRequest(BaseModel):

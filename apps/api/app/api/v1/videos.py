@@ -30,6 +30,8 @@ from app.models import (
     JobType,
     Project,
     ProjectStatus,
+    Transcript,
+    TranscriptStatus,
     UploadSession,
     UploadStatus,
     Video,
@@ -38,11 +40,13 @@ from app.models import (
 from app.schemas.common import OkResponse, Page
 from app.schemas.media import (
     JobOut,
+    NarrationScriptOut,
     SignedUrlOut,
     UploadCompleteResponse,
     UploadInitRequest,
     UploadInitResponse,
     UploadStatusResponse,
+    VideoUpdate,
     VideoOut,
 )
 from app.services.job_service import JobService
@@ -79,6 +83,60 @@ def list_videos(project_id: str, db: DbSession, user: CurrentUser, params: PageP
 @router.get("/videos/{video_id}", response_model=VideoOut)
 def read_video(video_id: str, db: DbSession, user: CurrentUser) -> VideoOut:
     video = owned_video(db, user, video_id)
+    return VideoOut.model_validate(video)
+
+
+@router.get("/videos/{video_id}/narration-script", response_model=NarrationScriptOut)
+def read_narration_script(video_id: str, db: DbSession, user: CurrentUser) -> NarrationScriptOut:
+    """Return the stored narration script so the editor can display and revise it."""
+    video = owned_video(db, user, video_id)
+    script = video.narration_script or ""
+    return NarrationScriptOut(
+        video_id=video.id,
+        narration_script=script,
+        has_narration_script=bool(script.strip()),
+        character_count=len(script),
+        word_count=len(script.split()),
+    )
+
+
+@router.patch("/videos/{video_id}", response_model=VideoOut)
+def update_video(video_id: str, payload: VideoUpdate, db: DbSession, user: CurrentUser) -> VideoOut:
+    """Update editable video metadata.
+
+    `narration_script` is the offline path to word-level timings: with a script
+    present, transcription aligns it to the audio rather than needing ASR weights.
+    A script change invalidates any existing transcript, so the next run is a
+    fresh alignment rather than a mix of old and new timings.
+    """
+    video = owned_video(db, user, video_id)
+    changed = False
+
+    if payload.original_filename is not None:
+        name = payload.original_filename.strip()
+        if not name:
+            raise ValidationError("A filename is required.", field="original_filename")
+        video.original_filename = name[:400]
+        changed = True
+
+    if payload.narration_script is not None:
+        script = payload.narration_script.strip()
+        if script != (video.narration_script or ""):
+            video.narration_script = script
+            changed = True
+            if script:
+                # Timings from the previous script would be wrong; clear the stale
+                # transcript so the UI cannot present them as current.
+                for transcript in db.execute(
+                    select(Transcript).where(Transcript.video_id == video.id)
+                ).scalars():
+                    if transcript.status == TranscriptStatus.COMPLETED.value:
+                        transcript.status = TranscriptStatus.SUPERSEDED.value
+                        transcript.error_message = "Superseded: the narration script changed."
+
+    if changed:
+        db.commit()
+        db.refresh(video)
     return VideoOut.model_validate(video)
 
 

@@ -316,6 +316,7 @@ function CaptionsTab({
                   {cue.words.map((word) => (
                     <input
                       key={word.index}
+                      aria-label={`Caption word ${word.index + 1}`}
                       className="w-auto min-w-[3rem] rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-slate-200 hover:border-ink-600 focus:border-accent-500 focus:outline-none"
                       value={edits[String(word.index)] ?? word.word}
                       onChange={(event) =>

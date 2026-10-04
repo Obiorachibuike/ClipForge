@@ -8,6 +8,7 @@ import { useProject } from '@/hooks/useProjects';
 import { useLive } from '@/lib/live';
 import { cn, formatBytes, formatDuration, jobLabel } from '@/lib/format';
 import { Card, ErrorState, ProgressBar, SectionHeader, Skeleton, StatusDot } from '@/components/ui';
+import ScriptPanel from '@/pages/project/ScriptPanel';
 import { toast } from '@/stores/ui';
 import { useUpload } from '@/hooks/useUpload';
 import type { Job, ProjectSummary, Video } from '@/types/api';
@@ -308,6 +309,12 @@ export default function ProjectPage() {
           <VideoPick projectId={projectId} />
         )}
       </section>
+
+      {data.latest_video && data.latest_video.status === 'ready' ? (
+        <section>
+          <ScriptPanel video={data.latest_video} projectId={projectId} />
+        </section>
+      ) : null}
 
       {videoCount > 0 ? (
         <section>

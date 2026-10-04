@@ -37,19 +37,13 @@ log = get_logger(__name__)
 router = APIRouter(tags=["Transcripts"])
 
 
-@router.get("/transcripts/{transcript_id}", response_model=TranscriptDetail)
-def read_transcript(
-    transcript_id: str,
-    db: DbSession,
-    user: CurrentUser,
-    include_words: bool = Query(default=True),
-    word_limit: int = Query(default=5000, ge=1, le=60000),
-) -> TranscriptDetail:
-    transcript = db.get(Transcript, transcript_id)
-    if transcript is None:
-        raise NotFoundError("Transcript not found.", code="transcript_not_found")
-    _assert_transcript_access(db, transcript, user)
+def _build_detail(db, transcript: Transcript, *, include_words: bool, word_limit: int) -> TranscriptDetail:
+    """Assemble the full transcript payload.
 
+    Shared by both read routes. It takes plain values rather than FastAPI
+    `Query` defaults on purpose: calling a route function directly leaves those
+    defaults as `Query` objects, which then fail deep inside SQLAlchemy.
+    """
     segments = [
         TranscriptSegmentOut.model_validate(row)
         for row in db.execute(
@@ -73,6 +67,21 @@ def read_transcript(
     return detail
 
 
+@router.get("/transcripts/{transcript_id}", response_model=TranscriptDetail)
+def read_transcript(
+    transcript_id: str,
+    db: DbSession,
+    user: CurrentUser,
+    include_words: bool = Query(default=True),
+    word_limit: int = Query(default=5000, ge=1, le=60000),
+) -> TranscriptDetail:
+    transcript = db.get(Transcript, transcript_id)
+    if transcript is None:
+        raise NotFoundError("Transcript not found.", code="transcript_not_found")
+    _assert_transcript_access(db, transcript, user)
+    return _build_detail(db, transcript, include_words=include_words, word_limit=word_limit)
+
+
 @router.get("/videos/{video_id}/transcript", response_model=TranscriptDetail | None)
 def video_transcript(video_id: str, db: DbSession, user: CurrentUser, include_words: bool = Query(default=True)) -> TranscriptDetail | None:
     video = owned_video(db, user, video_id)
@@ -81,7 +90,7 @@ def video_transcript(video_id: str, db: DbSession, user: CurrentUser, include_wo
     ).scalars().first()
     if transcript is None:
         return None
-    return read_transcript(transcript.id, db, user, include_words=include_words)
+    return _build_detail(db, transcript, include_words=include_words, word_limit=5000)
 
 
 @router.get("/transcripts/{transcript_id}/window", response_model=TranscriptWindow)

@@ -1,0 +1,29 @@
+[package]
+name = "clipforge-processor"
+version = "1.0.0"
+edition = "2021"
+description = "Optional Rust media-orchestration sidecar for ClipForge"
+license = "MIT"
+readme = "README.md"
+
+[[bin]]
+name = "clipforge-processor"
+path = "src/main.rs"
+
+[dependencies]
+# Web server for the `serve` mode.
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# JSON contract shared with the Python client (app/services/processor.py).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Structured logs, matching the API's tracing-style output.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
