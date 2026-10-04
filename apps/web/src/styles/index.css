@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-ink-700;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    @apply bg-accent-500/30 text-white;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent-500/70 ring-offset-2 ring-offset-ink-950;
+  }
+
+  /* Slim, dark scrollbars so timelines and panels feel native to the app. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #33334a transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-ink-600;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-500;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  input[type='range'] {
+    @apply h-1.5 w-full cursor-pointer appearance-none rounded-full bg-ink-600;
+  }
+
+  input[type='range']::-webkit-slider-thumb {
+    @apply h-4 w-4 appearance-none rounded-full bg-white shadow-glow transition-transform;
+  }
+
+  input[type='range']::-webkit-slider-thumb:hover {
+    @apply scale-110;
+  }
+}
+
+@layer components {
+  /* --------------------------------------------------------------- surfaces */
+  .card {
+    @apply rounded-card border border-ink-700/80 bg-ink-850/80 shadow-card backdrop-blur-sm;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 ease-premium hover:border-ink-600 hover:bg-ink-800/90 hover:shadow-float;
+  }
+
+  /* Subtle glass panel: restrained, not frosted-glass everywhere. */
+  .glass {
+    @apply border border-white/[0.06] bg-white/[0.03] backdrop-blur-md;
+  }
+
+  .panel-title {
+    @apply text-sm font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  /* --------------------------------------------------------------- controls */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5
+      text-sm font-semibold transition-all duration-200 ease-premium
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent-500 text-white shadow-glow hover:bg-accent-400 active:scale-[0.98];
+  }
+
+  .btn-secondary {
+    @apply btn border border-ink-600 bg-ink-800 text-slate-100 hover:border-ink-500 hover:bg-ink-700 active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply btn text-slate-300 hover:bg-ink-800 hover:text-white;
+  }
+
+  .btn-danger {
+    @apply btn border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400
+      transition-colors hover:bg-ink-800 hover:text-white disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-ink-600 bg-ink-900/80 px-3.5 py-2.5 text-sm text-slate-100
+      placeholder:text-slate-500 transition-colors
+      focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+
+  /* ----------------------------------------------------------------- badges */
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-2xs font-semibold uppercase tracking-wide;
+  }
+
+  .badge-neutral {
+    @apply badge bg-ink-700/80 text-slate-300;
+  }
+
+  .badge-accent {
+    @apply badge bg-accent-500/15 text-accent-200;
+  }
+
+  .badge-success {
+    @apply badge bg-emerald-500/15 text-emerald-300;
+  }
+
+  .badge-warning {
+    @apply badge bg-amber-500/15 text-amber-300;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-500/15 text-red-300;
+  }
+
+  /* ---------------------------------------------------------------- effects */
+  .text-gradient {
+    @apply bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-accent {
+    @apply bg-gradient-to-r from-accent-300 via-violet-400 to-signal-success bg-clip-text text-transparent;
+  }
+
+  .skeleton {
+    @apply animate-shimmer rounded-lg bg-gradient-to-r from-ink-800 via-ink-700 to-ink-800;
+    background-size: 200% 100%;
+  }
+
+  .divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-ink-600 to-transparent;
+  }
+
+  /* Timeline scrubber shared by the player and review screens. */
+  .timeline-track {
+    @apply relative h-2 w-full cursor-pointer overflow-hidden rounded-full bg-ink-700;
+  }
+
+  .timeline-progress {
+    @apply absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent-500 to-violet-500;
+  }
+
+  .timeline-clip-region {
+    @apply absolute inset-y-0 rounded-sm bg-accent-500/40 ring-1 ring-accent-400/60;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-shimmer,
+    .animate-pulseRing {
+      animation: none;
+    }
+  }
+}
