@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession, require_admin
+from app.api.deps import CurrentUser, DbSession, OptionalUser, require_admin
 from app.core.config import settings
 from app.core.errors import NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -240,7 +240,13 @@ def usage_history(db: DbSession, user: CurrentUser, months: int = 6, limit: int 
 
 # ------------------------------------------------------------------ billing ---
 @router.get("/billing/plans")
-def billing_plans(user: CurrentUser) -> dict:
+def billing_plans(user: OptionalUser) -> dict:
+    """Public plan catalogue.
+
+    Prices are marketing information and must render for signed-out visitors on
+    the landing and pricing pages; only the `current` marker needs a session.
+    """
+    current_plan = user.plan if user is not None else ""
     return {
         "plans": [
             {
@@ -263,7 +269,7 @@ def billing_plans(user: CurrentUser) -> dict:
                     "max_video_minutes": plan.limits.max_video_minutes,
                     "priority_queue": plan.limits.priority_queue,
                 },
-                "current": plan.key == user.plan,
+                "current": bool(current_plan) and plan.key == current_plan,
             }
             for plan in PLANS.values()
         ],

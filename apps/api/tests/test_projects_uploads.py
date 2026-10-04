@@ -203,3 +203,20 @@ def test_error_responses_are_structured(client):
     body = response.json()
     assert set(body) >= {"code", "message", "request_id"}
     assert response.headers.get("x-request-id") or body["request_id"]
+
+
+def test_billing_plans_are_public_but_the_current_marker_needs_a_session(anon_api, auth_api):
+    """Pricing must render on the landing page for signed-out visitors."""
+    anonymous = anon_api.get("/api/v1/billing/plans")
+    assert anonymous.status_code == 200, anonymous.text
+    body = anonymous.json()
+    keys = [plan["key"] for plan in body["plans"]]
+    assert {"free", "pro", "lifetime"} <= set(keys)
+    assert all(plan["current"] is False for plan in body["plans"]), "nobody is signed in"
+
+    signed_in = auth_api.get("/api/v1/billing/plans").json()
+    free = next(plan for plan in signed_in["plans"] if plan["key"] == "free")
+    assert free["current"] is True
+    for plan in signed_in["plans"]:
+        assert plan["features"] and plan["tagline"]
+        assert plan["limits"]["max_upload_bytes"] > 0

@@ -194,6 +194,20 @@ def api(client) -> ApiClient:
 
 
 @pytest.fixture()
+def anon_api(app_module) -> Iterator[ApiClient]:
+    """A standalone client that never signs in.
+
+    Needed whenever a test also uses an authenticated client: `auth_api` is built
+    on the shared `client` fixture, so any later request through `client` would
+    carry that session.
+    """
+    from fastapi.testclient import TestClient
+
+    with TestClient(app_module, base_url="http://testserver") as test_client:
+        yield ApiClient(test_client)
+
+
+@pytest.fixture()
 def auth_api(client) -> ApiClient:
     """Registered, signed-in API client."""
     wrapper = ApiClient(client)
