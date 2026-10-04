@@ -35,8 +35,13 @@ class AuthError(AppError):
 
 
 class PermissionError_(AppError):
-    def __init__(self, message: str = "You do not have access to this resource.") -> None:
-        super().__init__(message, code="forbidden", status_code=403)
+    def __init__(
+        self,
+        message: str = "You do not have access to this resource.",
+        *,
+        code: str = "forbidden",
+    ) -> None:
+        super().__init__(message, code=code, status_code=403)
 
 
 class NotFoundError(AppError):

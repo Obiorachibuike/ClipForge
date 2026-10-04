@@ -22,11 +22,7 @@ export default function ToastHost() {
   const dismiss = useUiStore((state) => state.dismissToast);
 
   return (
-    <div
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-4 sm:items-end"
-      role="status"
-      aria-live="polite"
-    >
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-4 sm:items-end">
       <AnimatePresence initial={false}>
         {toasts.map((toast) => {
           const Icon = ICONS[toast.kind];
@@ -42,6 +38,9 @@ export default function ToastHost() {
                 'pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-float backdrop-blur-md',
                 TONES[toast.kind],
               )}
+              // Errors interrupt; everything else waits for a natural pause.
+              role={toast.kind === 'error' ? 'alert' : 'status'}
+              aria-live={toast.kind === 'error' ? 'assertive' : 'polite'}
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
               <div className="min-w-0 flex-1">

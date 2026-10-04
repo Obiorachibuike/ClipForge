@@ -20,6 +20,19 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def as_utc(value: datetime) -> datetime:
+    """Attach UTC to a naive datetime read back from the database.
+
+    SQLite (and MySQL without a tz-aware driver) return naive datetimes even for
+    `DateTime(timezone=True)` columns, so any comparison against
+    `datetime.now(UTC)` would raise `TypeError`. Every stored timestamp in this
+    schema is UTC by construction, so labelling a naive value is correct.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class Base(DeclarativeBase):
     type_annotation_map = {dict: JSONColumn}
 

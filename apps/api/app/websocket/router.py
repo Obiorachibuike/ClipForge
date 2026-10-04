@@ -158,9 +158,16 @@ async def events_socket(
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
+                message = None
+            if not isinstance(message, dict):
+                # Valid JSON that is not an object (a list, a bare string, a
+                # number) is still a client bug — report it and keep the socket.
                 await manager.send(
                     connection,
-                    {"type": "system.error", "payload": {"code": "bad_message", "message": "Malformed message."}},
+                    {
+                        "type": "system.error",
+                        "payload": {"code": "bad_message", "message": "Messages must be JSON objects."},
+                    },
                 )
                 continue
             action = str(message.get("action") or "")

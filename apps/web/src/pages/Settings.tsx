@@ -18,6 +18,7 @@ interface SettingsResponse {
     privacy_mode: string;
     default_aspect_ratio: string;
     default_caption_preset: string;
+    created_at: string;
   };
   preferences: Record<string, unknown>;
   privacy: {
@@ -454,7 +455,7 @@ export default function SettingsPage() {
               {plans.data?.plans.find((plan) => plan.key === usage.data?.plan)?.name ?? 'Free'} plan
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Account created {formatDateTime(data?.user.id ? undefined : undefined) || 'recently'}.
+              Account created {formatDateTime(data?.user.created_at) || 'recently'}.
             </p>
           </div>
           <Link to="/pricing" className="btn-secondary btn-sm">

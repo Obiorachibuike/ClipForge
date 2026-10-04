@@ -108,28 +108,61 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, body);
 }
 
+/**
+ * Bodies that must reach `fetch` untouched.
+ *
+ * Upload chunks are `Blob` slices of the user's file: JSON-stringifying one (the
+ * default path for plain objects) would send the 2-byte text `{}` instead of the
+ * video bytes, and a `Content-Type: application/json` header would tell the
+ * server to expect the wrong thing.
+ */
+function isRawBody(body: unknown): body is BodyInit {
+  return (
+    body instanceof Blob ||
+    body instanceof ArrayBuffer ||
+    body instanceof FormData ||
+    body instanceof URLSearchParams ||
+    body instanceof ReadableStream ||
+    typeof body === 'string'
+  );
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query, signal, skipCsrf, raw, headers } = options;
   const finalHeaders: Record<string, string> = { Accept: 'application/json', ...headers };
-  if (body !== undefined && !(body instanceof FormData)) {
+  const rawBody = isRawBody(body);
+  if (body !== undefined && !rawBody) {
     finalHeaders['Content-Type'] = 'application/json';
   }
   if (method !== 'GET' && !skipCsrf && csrfToken) {
     finalHeaders['X-CSRF-Token'] = csrfToken;
   }
 
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    credentials: 'include',
-    headers: finalHeaders,
-    body:
-      body === undefined
-        ? undefined
-        : body instanceof FormData
-          ? body
-          : JSON.stringify(body),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, query), {
+      method,
+      credentials: 'include',
+      headers: finalHeaders,
+      body:
+        body === undefined
+          ? undefined
+          : rawBody
+            ? (body as BodyInit)
+            : JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    // A transport failure (offline, DNS, aborted request) is not a server
+    // message: without this, the UI would surface "TypeError: Failed to fetch".
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ApiError(0, {
+      code: 'network_error',
+      message: navigator.onLine
+        ? 'Could not reach the server. Check your connection and try again.'
+        : 'You appear to be offline. Reconnect and try again.',
+    });
+  }
 
   if (!response.ok) throw await parseError(response);
   if (raw) return response as unknown as T;

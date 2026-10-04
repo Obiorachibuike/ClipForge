@@ -47,6 +47,7 @@ export function formatBytes(bytes: number): string {
 export function formatRelative(value: string | Date | null | undefined): string {
   if (!value) return '';
   const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
   const diff = Date.now() - date.getTime();
   const minutes = Math.round(diff / 60000);
   if (minutes < 1) return 'just now';
@@ -61,6 +62,9 @@ export function formatRelative(value: string | Date | null | undefined): string 
 export function formatDateTime(value: string | Date | null | undefined): string {
   if (!value) return '';
   const date = typeof value === 'string' ? new Date(value) : value;
+  // Without this guard `toLocaleString` returns the literal "Invalid Date",
+  // which then renders in the UI.
+  if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',

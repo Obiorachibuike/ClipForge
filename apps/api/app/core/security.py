@@ -49,6 +49,10 @@ def password_strength_error(password: str) -> str | None:
 # ------------------------------------------------------------------ tokens ---
 def create_session_token(user_id: str, session_id: str, expires_at: datetime | None = None) -> str:
     now = datetime.now(UTC)
+    # `expires_at` may come straight off an ORM object, where SQLite hands back a
+    # naive datetime; `.timestamp()` would then read it as local time.
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
     payload: dict[str, Any] = {
         "sub": user_id,
         "sid": session_id,

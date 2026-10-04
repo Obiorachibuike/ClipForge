@@ -96,25 +96,41 @@ def text_value(value: Any, *, max_length: int = 500) -> str:
     return text[:max_length]
 
 
+# Characters the FFmpeg filtergraph parser treats as syntax rather than data.
+# Escaping these is what keeps a value from breaking out of the option it is
+# interpolated into. The shell is never involved (`run_ffmpeg` passes argv as a
+# list), so shell metacharacters such as `$` and `&` are harmless here.
+_FILTERGRAPH_SPECIALS = ("\\", ",", ";", ":", "[", "]", "'")
+
+
 def escape_expression(expression: str) -> str:
     """Escape an FFmpeg expression for use as a filter option value.
 
-    Inside a filtergraph, `,` separates filters and `:` separates options, so
-    commas inside expressions like `if(lt(t,3),1,2)` must be escaped or FFmpeg
-    rejects the whole graph with "Invalid argument".
+    Inside a filtergraph, `,` separates filters, `;` separates filter chains,
+    `:` separates options and `[]` delimit link labels, so any of them inside a
+    value must be escaped or FFmpeg rejects (or, worse, misparses) the graph —
+    e.g. `if(lt(t,3),1,2)` needs its commas escaped.
+
+    Escape order matters: the backslash must be doubled first, or the escapes
+    added afterwards would themselves get escaped.
     """
-    text = str(expression)
-    text = text.replace("\\", "\\\\").replace(",", r"\,").replace(":", r"\:")
-    return text.replace("'", r"\'")
+    text = str(expression).replace("\r", "").replace("\n", "")
+    text = text.replace("\\", "\\\\")
+    for special in _FILTERGRAPH_SPECIALS[1:]:
+        text = text.replace(special, f"\\{special}")
+    return text
 
 
 def escape_filter_path(path: str | Path) -> str:
-    """Escape a filesystem path for use inside an FFmpeg filter argument."""
-    text = str(path).replace("\\", "/")
-    text = text.replace(":", r"\:")
-    text = text.replace("'", r"\'")
-    text = text.replace(",", r"\,")
-    text = text.replace("[", r"\[").replace("]", r"\]")
+    """Escape a filesystem path for use inside an FFmpeg filter argument.
+
+    Backslashes become forward slashes first (Windows separators are never
+    meaningful in a filtergraph), then every filtergraph metacharacter is
+    escaped so a path containing `:` or `,` cannot split the filter options.
+    """
+    text = str(path).replace("\\", "/").replace("\r", "").replace("\n", "")
+    for special in (":", "'", ",", ";", "[", "]"):
+        text = text.replace(special, f"\\{special}")
     return text
 
 

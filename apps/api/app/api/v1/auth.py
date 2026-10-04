@@ -6,7 +6,7 @@ JavaScript, so localStorage never holds a credential.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
@@ -23,7 +23,7 @@ from app.core.security import (
     token_fingerprint,
     verify_password,
 )
-from app.models import PasswordResetToken, Session as SessionModel, User, utcnow
+from app.models import PasswordResetToken, Session as SessionModel, User, as_utc, utcnow
 from app.schemas.auth import (
     Credentials,
     PasswordChange,
@@ -41,7 +41,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 def _set_session_cookies(response: Response, token: str, csrf: str, expires_at: datetime) -> None:
-    max_age = max(60, int((expires_at - datetime.now(UTC)).total_seconds()))
+    max_age = max(60, int((as_utc(expires_at) - datetime.now(UTC)).total_seconds()))
     response.set_cookie(
         settings.session_cookie_name,
         token,
@@ -155,7 +155,7 @@ def request_password_reset(payload: PasswordResetRequest, db: DbSession) -> Mess
         reset = PasswordResetToken(
             user_id=user.id,
             token_hash="pending",
-            expires_at=utcnow().replace(microsecond=0) + __import__("datetime").timedelta(hours=2),
+            expires_at=utcnow().replace(microsecond=0) + timedelta(hours=2),
         )
         db.add(reset)
         db.flush()
@@ -177,7 +177,7 @@ def confirm_password_reset(payload: PasswordResetConfirm, db: DbSession) -> OkRe
     ).scalars().first()
     if record is None or record.used_at is not None:
         raise ValidationError("That reset link is not valid.", field="token")
-    expires = record.expires_at if record.expires_at.tzinfo else record.expires_at.replace(tzinfo=UTC)
+    expires = as_utc(record.expires_at)
     if expires < datetime.now(UTC):
         raise ValidationError("That reset link has expired.", field="token")
     user = db.get(User, record.user_id)

@@ -44,6 +44,7 @@ export interface LiveClientOptions {
 
 export class LiveClient {
   private socket: WebSocket | null = null;
+  private opening = false;
   private state: ConnectionState = 'idle';
   private attempt = 0;
   private closedByUser = false;
@@ -61,6 +62,11 @@ export class LiveClient {
 
   connect(): void {
     this.closedByUser = false;
+    // `opening` guards the window before `this.socket` is assigned, which
+    // `open()` only does after awaiting a ticket. Without it, two calls in the
+    // same tick (React StrictMode double-invokes effects) open two sockets and
+    // every event is delivered twice.
+    if (this.opening) return;
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -69,6 +75,7 @@ export class LiveClient {
 
   disconnect(): void {
     this.closedByUser = true;
+    this.opening = false;
     this.clearTimers();
     if (this.socket) {
       try {
@@ -111,6 +118,8 @@ export class LiveClient {
   }
 
   private async open(): Promise<void> {
+    if (this.opening) return;
+    this.opening = true;
     this.setState(this.attempt === 0 ? 'connecting' : 'reconnecting');
 
     let ticket: string | null = null;
@@ -119,7 +128,10 @@ export class LiveClient {
     } catch {
       ticket = null;
     }
-    if (this.closedByUser) return;
+    if (this.closedByUser) {
+      this.opening = false;
+      return;
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const query = new URLSearchParams();
@@ -131,9 +143,11 @@ export class LiveClient {
     try {
       socket = new WebSocket(url);
     } catch {
+      this.opening = false;
       this.scheduleReconnect();
       return;
     }
+    this.opening = false;
     this.socket = socket;
     this.lastMessageAt = Date.now();
 

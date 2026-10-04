@@ -15,7 +15,7 @@ from app.core.errors import AuthError, NotFoundError, PermissionError_, RateLimi
 from app.core.logging import get_logger
 from app.core.rate_limit import check_rate_limit
 from app.core.security import csrf_matches, decode_session_token, token_fingerprint
-from app.models import Clip, Job, Project, RenderJob, Session as SessionModel, User, Video
+from app.models import Clip, Job, Project, RenderJob, Session as SessionModel, User, Video, as_utc
 
 log = get_logger(__name__)
 
@@ -47,10 +47,7 @@ def _load_session(request: Request, db: Session) -> tuple[SessionModel, User] | 
     ).scalars().first()
     if session is None or session.revoked_at is not None:
         raise AuthError("Your session is no longer valid. Please sign in again.", code="invalid_session")
-    expires = session.expires_at
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=UTC)
-    if expires < datetime.now(UTC):
+    if as_utc(session.expires_at) < datetime.now(UTC):
         raise AuthError("Your session has expired. Please sign in again.", code="session_expired")
     user = db.get(User, session.user_id)
     if user is None or not user.is_active:
@@ -82,17 +79,28 @@ def get_optional_user(request: Request, db: DbSession) -> User | None:
 
 
 def _enforce_csrf(request: Request, session: SessionModel) -> None:
-    """Double-submit CSRF token check for state-changing requests."""
+    """Double-submit CSRF check for state-changing requests.
+
+    The browser reads the (deliberately non-HttpOnly) `clipforge_csrf` cookie and
+    echoes it back in `X-CSRF-Token`. Only the *header* is accepted: a check that
+    also accepted the cookie value on its own would be no protection whatsoever,
+    because a cross-site form post carries the victim's cookies automatically —
+    the attacker's whole problem is reading them, not sending them. Comparing the
+    header against the server-side session token (rather than the cookie) also
+    defeats cookie-injection from a sibling subdomain.
+
+    Absent or empty session tokens fail closed: sessions always receive one at
+    creation, so a missing value means corrupt state, not permission to proceed.
+    """
     if request.method in SAFE_METHODS:
         return
     if request.url.path.endswith("/auth/login") or request.url.path.endswith("/auth/register"):
         return
-    cookie_token = request.cookies.get(settings.csrf_cookie_name)
-    header_token = request.headers.get(settings.csrf_header_name)
-    if not session.csrf_token:
-        return
-    if not csrf_matches(session.csrf_token, header_token) and not csrf_matches(session.csrf_token, cookie_token):
-        raise AuthError("Security check failed. Refresh the page and try again.", code="csrf_failed")
+    if not session.csrf_token or not csrf_matches(session.csrf_token, request.headers.get(settings.csrf_header_name)):
+        raise PermissionError_(
+            "Security check failed. Refresh the page and try again.",
+            code="csrf_failed",
+        )
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
