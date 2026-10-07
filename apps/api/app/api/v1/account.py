@@ -102,7 +102,9 @@ def _capabilities() -> dict:
         "billing": available_providers(),
         "processor": {
             "enabled": bool(settings.processor_enabled and settings.processor_url),
-            "url": settings.processor_url,
+            # Never return a service-binding URL to browser code. It is an
+            # internal reachability grant, not a user-facing endpoint.
+            "transport": "internal_service" if settings.processor_url else "in_process",
         },
         "environment": settings.environment,
     }

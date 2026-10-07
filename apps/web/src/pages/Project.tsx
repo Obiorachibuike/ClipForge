@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, FileVideo, Play, RefreshCw, Scissors, Upload, X } from 'lucide-react';
+import { AlertTriangle, FileVideo, Link2, LoaderCircle, Play, RefreshCw, Scissors, Upload, X } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { queryKeys } from '@/lib/query';
 import { useProject } from '@/hooks/useProjects';
@@ -16,7 +16,29 @@ import type { Job, ProjectSummary, Video } from '@/types/api';
 function VideoPick({ projectId }: { projectId: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const upload = useUpload(projectId);
+  const queryClient = useQueryClient();
   const [dragging, setDragging] = useState(false);
+  const [videoUrl, setVideoUrl] = useState('');
+
+  const importUrl = useMutation({
+    mutationFn: (url: string) => api.post<Job>(`/projects/${projectId}/videos/import-url`, { url }),
+    onSuccess: () => {
+      setVideoUrl('');
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectJobs(projectId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) });
+      toast({
+        kind: 'success',
+        title: 'Video import started',
+        description: 'ClipForge is downloading the public video and will inspect it next.',
+      });
+    },
+    onError: (error: unknown) =>
+      toast({
+        kind: 'error',
+        title: 'Could not import video',
+        description: error instanceof Error ? error.message : 'Check the URL and try again.',
+      }),
+  });
 
   const pick = useCallback(
     (file: File | undefined) => {
@@ -60,6 +82,42 @@ function VideoPick({ projectId }: { projectId: string }) {
         className="hidden"
         onChange={(event) => pick(event.target.files?.[0] ?? undefined)}
       />
+
+      <div className="my-2 flex w-full max-w-xl items-center gap-3" aria-hidden>
+        <span className="h-px flex-1 bg-ink-700" />
+        <span className="text-2xs font-semibold uppercase tracking-[0.18em] text-slate-600">or paste a link</span>
+        <span className="h-px flex-1 bg-ink-700" />
+      </div>
+      <form
+        className="flex w-full max-w-xl flex-col gap-2 sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const value = videoUrl.trim();
+          if (value) importUrl.mutate(value);
+        }}
+      >
+        <label className="relative flex-1">
+          <span className="sr-only">Public video URL</span>
+          <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden />
+          <input
+            type="url"
+            className="input pl-9"
+            value={videoUrl}
+            onChange={(event) => setVideoUrl(event.target.value)}
+            placeholder="Paste a YouTube, TikTok, Facebook or Instagram URL"
+            inputMode="url"
+            autoComplete="url"
+            required
+          />
+        </label>
+        <button type="submit" className="btn-secondary shrink-0" disabled={!videoUrl.trim() || importUrl.isPending}>
+          {importUrl.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />}
+          {importUrl.isPending ? 'Starting…' : 'Import video'}
+        </button>
+      </form>
+      <p className="max-w-xl text-2xs text-slate-500">
+        Public videos only. Supports YouTube, TikTok, Facebook, Instagram, Vimeo, Dailymotion, Twitch and X.
+      </p>
 
       {upload.status !== 'idle' ? (
         <div className="mt-3 w-full max-w-md">
@@ -275,7 +333,7 @@ export default function ProjectPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight text-white">{data.name}</h1>
+            <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-100">{data.name}</h1>
             <span className="badge-neutral">{data.status}</span>
           </div>
           <p className="mt-1 text-sm text-slate-400">

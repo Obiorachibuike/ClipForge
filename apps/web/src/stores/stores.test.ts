@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCsrfToken, setUnauthorizedHandler } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { useEventsStore } from '@/stores/events';
-import { errorToast, toast, useUiStore } from '@/stores/ui';
+import { applyTheme, errorToast, toast, useUiStore } from '@/stores/ui';
 import { installFetchDouble, type FetchDouble } from '@/test/utils';
 
 let server: FetchDouble;
@@ -29,6 +29,9 @@ const SESSION = {
 
 beforeEach(() => {
   server = installFetchDouble();
+  window.localStorage.removeItem('clipforge_theme');
+  applyTheme('dark');
+  useUiStore.setState({ theme: 'dark' });
   useAuthStore.setState({ user: null, status: 'unknown', sessionExpiresAt: null, error: null, busy: false });
 });
 
@@ -126,6 +129,18 @@ describe('auth store', () => {
 });
 
 describe('ui store', () => {
+  it('switches and persists the application theme', () => {
+    useUiStore.getState().setTheme('light');
+    expect(useUiStore.getState().theme).toBe('light');
+    expect(document.documentElement.classList.contains('light')).toBe(true);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(window.localStorage.getItem('clipforge_theme')).toBe('light');
+
+    useUiStore.getState().toggleTheme();
+    expect(useUiStore.getState().theme).toBe('dark');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
   it('pushes a toast with a generated id and auto-dismisses it', () => {
     vi.useFakeTimers();
     const id = toast({ kind: 'success', title: 'Saved', duration: 1000 });

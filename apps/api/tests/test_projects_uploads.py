@@ -157,6 +157,26 @@ def test_upload_cannot_be_completed_by_another_account(auth_api, second_api):
     assert second_api.delete(f"/api/v1/uploads/{upload_id}").status_code == 404
 
 
+def test_remote_video_import_validates_platform_and_queues_work(auth_api):
+    project_id = auth_api.post("/api/v1/projects", json={"name": "Remote source"}).json()["id"]
+
+    rejected = auth_api.post(
+        f"/api/v1/projects/{project_id}/videos/import-url",
+        json={"url": "http://127.0.0.1/private-video.mp4"},
+    )
+    assert rejected.status_code == 422
+
+    queued = auth_api.post(
+        f"/api/v1/projects/{project_id}/videos/import-url",
+        json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+    )
+    assert queued.status_code == 202, queued.text
+    body = queued.json()
+    assert body["type"] == "video.import_url"
+    assert body["project_id"] == project_id
+    assert body["status"] == "queued"
+
+
 def test_job_endpoints_are_owned_and_never_synchronous(auth_api, second_api):
     jobs = auth_api.get("/api/v1/jobs").json()
     assert "items" in jobs and "total" in jobs

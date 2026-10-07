@@ -10,12 +10,22 @@ const LABELS: Record<ConnectionState, string> = {
 };
 
 const TONES: Record<ConnectionState, string> = {
-  idle: 'bg-ink-500',
-  connecting: 'bg-amber-400 animate-pulse',
-  open: 'bg-emerald-400',
-  reconnecting: 'bg-amber-400 animate-pulse',
-  closed: 'bg-red-400',
+  idle: 'text-slate-500',
+  connecting: 'text-amber-400 animate-pulse',
+  open: 'text-emerald-400',
+  reconnecting: 'text-amber-400 animate-pulse',
+  closed: 'text-red-400',
 };
+
+function SignalIcon({ state }: { state: ConnectionState }) {
+  return (
+    <svg viewBox="0 0 20 20" className={cn('h-3.5 w-3.5', TONES[state])} fill="none" aria-hidden>
+      <circle cx="10" cy="14.8" r="1.55" fill="currentColor" />
+      <path d="M6.65 11.5a4.75 4.75 0 0 1 6.7 0" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" />
+      <path d="M3.95 8.75a8.6 8.6 0 0 1 12.1 0" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" opacity=".72" />
+    </svg>
+  );
+}
 
 /**
  * Honest connection indicator. When the socket is down the app keeps working
@@ -36,12 +46,7 @@ export default function ConnectionBadge({ state, className }: { state: Connectio
           : 'Live updates are connected'
       }
     >
-      <span className="relative flex h-1.5 w-1.5">
-        <span className={cn('h-1.5 w-1.5 rounded-full', TONES[state])} />
-        {state === 'open' ? (
-          <span className="absolute inset-0 animate-pulseRing rounded-full bg-emerald-400/70" />
-        ) : null}
-      </span>
+      <SignalIcon state={state} />
       {LABELS[state]}
     </span>
   );

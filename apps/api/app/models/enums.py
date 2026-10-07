@@ -92,6 +92,7 @@ class JobStatus(StrEnum):
 
 
 class JobType(StrEnum):
+    VIDEO_IMPORT_URL = "video.import_url"
     VIDEO_PROBE = "video.probe"
     VIDEO_TRANSCRIBE = "video.transcribe"
     VIDEO_ANALYZE_FRAMING = "video.analyze_framing"

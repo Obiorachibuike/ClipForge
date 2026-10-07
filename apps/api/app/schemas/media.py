@@ -130,6 +130,24 @@ class UploadInitRequest(BaseModel):
     project_name: str | None = Field(default=None, max_length=160)
 
 
+class RemoteVideoImportRequest(BaseModel):
+    """A public video page to download through the worker.
+
+    Validation deliberately allows only known media platforms. Besides giving
+    users a clear contract, this prevents the downloader from becoming an SSRF
+    proxy for arbitrary hosts on the deployment's private network.
+    """
+
+    url: str = Field(min_length=10, max_length=2048)
+
+    @field_validator("url")
+    @classmethod
+    def _supported_video_url(cls, value: str) -> str:
+        from app.services.remote_video import validate_remote_video_url
+
+        return validate_remote_video_url(value)
+
+
 class UploadInitResponse(BaseModel):
     upload_id: str
     project_id: str

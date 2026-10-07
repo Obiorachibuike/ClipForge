@@ -44,7 +44,7 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
     <Link to={`/projects/${project.id}`} className="card card-hover group block p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold text-white group-hover:text-accent-200">{project.name}</h3>
+          <h3 className="truncate text-base font-semibold text-slate-100 group-hover:text-accent-200">{project.name}</h3>
           <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
             {project.description || formatRelative(project.updated_at)}
           </p>
@@ -103,7 +103,7 @@ function NewProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="card relative w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold text-white">New project</h2>
+        <h2 className="text-lg font-semibold text-slate-100">New project</h2>
         <p className="mt-1 text-sm text-slate-400">
           Upload a long video and ClipForge will transcribe, analyse and suggest clips.
         </p>
@@ -205,7 +205,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-6xl space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
             {user?.name ? `Welcome back, ${user.name.split(' ')[0]}` : 'Dashboard'}
           </h1>
           <p className="mt-1 text-sm text-slate-400">

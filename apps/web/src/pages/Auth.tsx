@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, KeyRound, Mail, Sparkles, User } from 'lucide-react';
+import { ArrowRight, KeyRound, Mail, User } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { api } from '@/lib/api';
+import ClipForgeMark from '@/components/ClipForgeMark';
+import ThemeToggle from '@/components/ThemeToggle';
 import { toast } from '@/stores/ui';
 
 export default function AuthPage({ mode }: { mode: 'login' | 'register' }) {
@@ -69,7 +71,8 @@ export default function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink-950 px-4 py-12">
+      <ThemeToggle className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6" />
       <div className="pointer-events-none absolute inset-0 bg-hero-glow" />
       <motion.div
         initial={{ opacity: 0, y: 14 }}
@@ -78,14 +81,14 @@ export default function AuthPage({ mode }: { mode: 'login' | 'register' }) {
         className="relative w-full max-w-md"
       >
         <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-violet-500">
-            <Sparkles className="h-4.5 w-4.5 text-white" aria-hidden />
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-violet-500 shadow-[0_8px_28px_rgba(91,108,255,0.32)]">
+            <ClipForgeMark className="h-5.5 w-5.5 text-white" />
           </span>
-          <span className="text-lg font-semibold tracking-tight text-white">ClipForge</span>
+          <span className="text-lg font-semibold tracking-tight text-slate-100">ClipForge</span>
         </Link>
 
         <div className="card p-7">
-          <h1 className="text-xl font-semibold text-white">
+          <h1 className="text-xl font-semibold text-slate-100">
             {isRegister ? 'Create your account' : 'Welcome back'}
           </h1>
           <p className="mt-1.5 text-sm text-slate-400">

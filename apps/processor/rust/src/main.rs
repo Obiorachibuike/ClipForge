@@ -142,8 +142,14 @@ fn print_usage() {
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    let json_logs = std::env::var("LOG_JSON").map(|value| value == "true").unwrap_or(false);
+    let json_logs = std::env::var("LOG_JSON")
+        .map(|value| value == "true")
+        .unwrap_or(false);
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
     // `try_init` keeps a double init (tests, embedding) from panicking.
-    let _ = if json_logs { builder.json().try_init() } else { builder.try_init() };
+    let _ = if json_logs {
+        builder.json().try_init()
+    } else {
+        builder.try_init()
+    };
 }

@@ -1,5 +1,42 @@
 # Deployment
 
+## Vercel Services (Beta)
+
+The root `vercel.json` deploys one Vercel project as three independently built
+services:
+
+| Service | Root | Exposure | Notes |
+| --- | --- | --- | --- |
+| `web` | `apps/web` | Public catch-all `/(.*)` | Vite SPA |
+| `api` | `apps/api` | Public `/api/*`, `/ws/*`, health and API docs | FastAPI (`app.main:app`) |
+| `processor` | `apps/processor/rust` | Internal only | Rust/FFmpeg container |
+
+The `api` service declares a service binding to `processor`. Vercel injects its
+internal base URL as `PROCESSOR_URL`; **do not create that variable manually**.
+Set `PROCESSOR_ENABLED=true` if you want the optional sidecar used. The Python
+pipeline continues locally when the sidecar is disabled or unavailable.
+
+Run the multi-service topology locally with:
+
+```bash
+vercel dev -L
+```
+
+For a real deployment, configure at least `SECRET_KEY`, `JWT_SECRET`,
+`ENCRYPTION_KEY`, `DATABASE_URL`, `STORAGE_BACKEND=s3`, and the relevant `S3_*`
+values in the Vercel project. Vercel filesystems are ephemeral, so SQLite and
+local media storage are suitable only for a local smoke test. Set
+`ENVIRONMENT=production`, `COOKIE_SECURE=true`, `FRONTEND_URL` and
+`CORS_ORIGINS` to the deployment's HTTPS origin. URL imports also need outbound
+access to the source platform; private/authenticated videos are intentionally
+not accepted.
+
+> The Rust processor currently receives local workspace paths from the Python
+> pipeline. Separate Vercel services do not share a filesystem, so media calls
+> safely fall back to Python until the processor contract is changed to use
+> signed object-storage URLs. Its health endpoint and binding still work, and it
+> remains private because no top-level rewrite targets it.
+
 ## Docker Compose
 
 ```bash

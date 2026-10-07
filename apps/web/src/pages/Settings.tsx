@@ -135,7 +135,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-white">Settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Settings</h1>
         <p className="mt-1 text-sm text-slate-400">Profile, privacy, AI providers, usage and deployment capabilities.</p>
       </div>
 
@@ -219,7 +219,7 @@ export default function SettingsPage() {
                   : 'border-ink-700 bg-ink-900/50 hover:border-ink-600'
               }`}
             >
-              <p className="flex items-center gap-2 text-sm font-medium text-white">
+              <p className="flex items-center gap-2 text-sm font-medium text-slate-100">
                 {mode.key === 'private_ai' ? (
                   <Lock className="h-3.5 w-3.5 text-accent-300" aria-hidden />
                 ) : (
@@ -432,7 +432,7 @@ export default function SettingsPage() {
               <Stat
                 label="Rust processor"
                 value={caps.processor.enabled ? 'enabled' : 'off'}
-                hint={caps.processor.enabled ? caps.processor.url : 'Python pipeline in use'}
+                hint={caps.processor.enabled ? 'Private service binding' : 'Python pipeline in use'}
               />
             </div>
           </div>

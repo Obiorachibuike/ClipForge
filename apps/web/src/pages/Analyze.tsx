@@ -101,7 +101,7 @@ function Insights({ transcript, projectId }: { transcript: Transcript | null; pr
     <div className="space-y-4">
       {alignment?.applied ? (
         <Card>
-          <h3 className="text-sm font-semibold text-white">Script alignment</h3>
+          <h3 className="text-sm font-semibold text-slate-100">Script alignment</h3>
           <p className="mt-1 text-sm text-slate-400">
             Word timings were produced by aligning the supplied script against the real audio.
           </p>
@@ -121,7 +121,7 @@ function Insights({ transcript, projectId }: { transcript: Transcript | null; pr
 
       {diarization ? (
         <Card>
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
             <Users className="h-4 w-4 text-slate-400" aria-hidden />
             Speaker analysis
           </h3>
@@ -142,7 +142,7 @@ function Insights({ transcript, projectId }: { transcript: Transcript | null; pr
       ) : null}
 
       <Card>
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
           <Activity className="h-4 w-4 text-slate-400" aria-hidden />
           Framing analysis
         </h3>
@@ -265,7 +265,7 @@ export default function AnalyzePage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">Analysis</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Analysis</h1>
           <p className="mt-1 text-sm text-slate-400">
             What ClipForge measured from your media: words, timings, speakers and framing.
           </p>
@@ -296,7 +296,7 @@ export default function AnalyzePage() {
             onClick={() => setTab(item.key)}
             className={cn(
               'flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-              tab === item.key ? 'bg-ink-700 text-white' : 'text-slate-400 hover:text-slate-200',
+              tab === item.key ? 'bg-ink-700 text-slate-100' : 'text-slate-400 hover:text-slate-200',
             )}
           >
             <item.icon className="h-4 w-4" aria-hidden />

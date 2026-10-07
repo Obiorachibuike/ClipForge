@@ -110,14 +110,19 @@ pub fn ffprobe_json(path: &str) -> Result<Value, String> {
         .map_err(|error| format!("could not execute ffprobe: {error}"))?;
 
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect::<String>();
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .chars()
+            .take(400)
+            .collect::<String>();
         return Err(if detail.is_empty() {
             "ffprobe could not read this file".to_string()
         } else {
             detail
         });
     }
-    serde_json::from_slice(&output.stdout).map_err(|error| format!("ffprobe returned malformed JSON: {error}"))
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("ffprobe returned malformed JSON: {error}"))
 }
 
 // ------------------------------------------------------------ field helpers ---
@@ -173,7 +178,10 @@ fn rotation_of(stream: &Value) -> i64 {
             }
         }
     }
-    integer_field(&stream.get("tags").cloned().unwrap_or(Value::Null), "rotate")
+    integer_field(
+        &stream.get("tags").cloned().unwrap_or(Value::Null),
+        "rotate",
+    )
 }
 
 /// Convert an FFprobe document into the exact shape `media/ffmpeg.py` produces,
@@ -214,7 +222,10 @@ pub fn normalize_probe(raw: &Value) -> Value {
                 has_audio = true;
                 audio_codec = text_field(stream, "codec_name");
                 audio_channels = integer_field(stream, "channels");
-                audio_sample_rate = text_field(stream, "sample_rate").trim().parse::<i64>().unwrap_or(0);
+                audio_sample_rate = text_field(stream, "sample_rate")
+                    .trim()
+                    .parse::<i64>()
+                    .unwrap_or(0);
             }
             _ => {}
         }
@@ -222,7 +233,10 @@ pub fn normalize_probe(raw: &Value) -> Value {
 
     // `format.duration` is authoritative for containers that report it; a
     // stream-level duration is the fallback.
-    let mut duration = text_field(&format, "duration").trim().parse::<f64>().unwrap_or(0.0);
+    let mut duration = text_field(&format, "duration")
+        .trim()
+        .parse::<f64>()
+        .unwrap_or(0.0);
     if duration <= 0.0 {
         for stream in &streams {
             let candidate = number_field(stream, "duration");
