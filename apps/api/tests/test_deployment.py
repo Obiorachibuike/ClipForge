@@ -35,7 +35,12 @@ def test_vercel_services_route_public_traffic_and_bind_the_internal_processor():
     assert services["api"]["entrypoint"] == "app.main:app"
     assert services["processor"]["runtime"] == "container"
     assert services["processor"]["entrypoint"] == "Dockerfile"
-    assert services["processor"]["command"][-1] == "0.0.0.0:80"
+    # Container services use the image's CMD/EXPOSE settings. `command` is not
+    # a supported service-level Vercel setting and causes deployment validation
+    # to fail, so keep the processor startup contract in its Dockerfile.
+    processor_dockerfile = (REPO_ROOT / "apps/processor/rust/Dockerfile").read_text()
+    assert 'EXPOSE 8100' in processor_dockerfile
+    assert 'CMD ["clipforge-processor", "serve", "0.0.0.0:8100"]' in processor_dockerfile
 
     assert services["api"]["bindings"] == [
         {"type": "service", "service": "processor", "format": "url", "env": "PROCESSOR_URL"}

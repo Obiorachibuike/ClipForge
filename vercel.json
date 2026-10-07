@@ -17,12 +17,7 @@
     "processor": {
       "root": "apps/processor/rust",
       "runtime": "container",
-      "entrypoint": "Dockerfile",
-      "command": [
-        "clipforge-processor",
-        "serve",
-        "0.0.0.0:80"
-      ]
+      "entrypoint": "Dockerfile"
     },
     "web": {
       "root": "apps/web",
