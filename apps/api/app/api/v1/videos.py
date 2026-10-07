@@ -41,6 +41,7 @@ from app.schemas.common import OkResponse, Page
 from app.schemas.media import (
     JobOut,
     NarrationScriptOut,
+    RemoteVideoImportRequest,
     SignedUrlOut,
     UploadCompleteResponse,
     UploadInitRequest,
@@ -78,6 +79,42 @@ def list_videos(project_id: str, db: DbSession, user: CurrentUser, params: PageP
 
     total = int(db.execute(select(func.count(Video.id)).where(Video.project_id == project_id)).scalar_one())
     return Page.build([VideoOut.model_validate(row) for row in rows], total, params.limit, params.offset)
+
+
+@router.post(
+    "/projects/{project_id}/videos/import-url",
+    response_model=JobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(upload_rate_limit)],
+)
+def import_video_url(
+    project_id: str,
+    payload: RemoteVideoImportRequest,
+    db: DbSession,
+    user: CurrentUser,
+) -> JobOut:
+    """Queue a public YouTube, TikTok, Facebook or other supported video URL.
+
+    Downloading happens in a worker. The result enters the exact same storage,
+    quota validation and media-probe path as an uploaded file.
+    """
+    project = owned_project(db, user, project_id)
+    active = JobService.active_for_user(db, user.id, project.id)
+    if any(job.type == JobType.VIDEO_IMPORT_URL.value for job in active):
+        raise ConflictError("A video URL is already being imported for this project.", code="url_import_running")
+
+    project.status = ProjectStatus.PROCESSING.value
+    db.commit()
+    job = JobService.create(
+        db,
+        type_=JobType.VIDEO_IMPORT_URL.value,
+        payload={"url": payload.url},
+        user_id=user.id,
+        project_id=project.id,
+        priority=8,
+        max_attempts=1,
+    )
+    return JobOut.model_validate(job)
 
 
 @router.get("/videos/{video_id}", response_model=VideoOut)

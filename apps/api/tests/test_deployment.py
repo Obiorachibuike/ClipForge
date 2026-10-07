@@ -7,6 +7,7 @@ or a proxy upstream that names a service that does not exist.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -20,6 +21,33 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def _compose() -> dict:
     return yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+
+
+def _vercel() -> dict:
+    return json.loads((REPO_ROOT / "vercel.json").read_text())
+
+
+def test_vercel_services_route_public_traffic_and_bind_the_internal_processor():
+    config = _vercel()
+    services = config["services"]
+    assert set(services) == {"api", "processor", "web"}
+    assert services["api"]["root"] == "apps/api"
+    assert services["api"]["entrypoint"] == "app.main:app"
+    assert services["processor"]["runtime"] == "container"
+    assert services["processor"]["entrypoint"] == "Dockerfile"
+    assert services["processor"]["command"][-1] == "0.0.0.0:80"
+
+    assert services["api"]["bindings"] == [
+        {"type": "service", "service": "processor", "format": "url", "env": "PROCESSOR_URL"}
+    ]
+    # The processor has no top-level rewrite, so it remains internal. API and
+    # WebSocket rules must precede the web catch-all.
+    rewrites = config["rewrites"]
+    targets = [(rule["source"], rule["destination"]["service"]) for rule in rewrites]
+    assert targets[0] == ("/api/(.*)", "api")
+    assert ("/ws/(.*)", "api") in targets
+    assert targets[-1] == ("/(.*)", "web")
+    assert all(service != "processor" for _, service in targets)
 
 
 def test_compose_defines_the_full_stack():

@@ -8,7 +8,6 @@ import {
   Menu,
   Scissors,
   Settings,
-  Sparkles,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/format';
@@ -16,6 +15,8 @@ import { useLive } from '@/lib/live';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
 import ConnectionBadge from '@/components/ConnectionBadge';
+import ClipForgeMark from '@/components/ClipForgeMark';
+import ThemeToggle from '@/components/ThemeToggle';
 
 interface NavItem {
   to: string;
@@ -52,7 +53,7 @@ function Navigation({ projectId, onNavigate }: { projectId?: string; onNavigate?
             cn(
               'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
               isActive
-                ? 'bg-accent-500/15 text-white shadow-[inset_0_0_0_1px_rgba(91,108,255,0.25)]'
+                ? 'bg-accent-500/15 text-slate-100 shadow-[inset_0_0_0_1px_rgba(91,108,255,0.25)]'
                 : 'text-slate-400 hover:bg-ink-800 hover:text-slate-100',
             )
           }
@@ -81,10 +82,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 border-r border-ink-800 bg-ink-900/70 px-4 py-5">
       <NavLink to="/dashboard" onClick={onNavigate} className="flex items-center gap-2.5 px-1">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500">
-          <Sparkles className="h-4 w-4 text-white" aria-hidden />
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 shadow-[0_8px_24px_rgba(91,108,255,0.3)]">
+          <ClipForgeMark className="h-5 w-5 text-white" />
         </span>
-        <span className="text-base font-semibold tracking-tight text-white">ClipForge</span>
+        <span className="text-base font-semibold tracking-tight text-slate-100">ClipForge</span>
       </NavLink>
 
       <Navigation projectId={projectId} onNavigate={onNavigate} />
@@ -172,6 +173,7 @@ export default function AppShell() {
             <Menu className="h-5 w-5" />
           </button>
           <div className="flex-1" />
+          <ThemeToggle />
           <ConnectionBadge state={connection} />
         </header>
         <main className="min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">

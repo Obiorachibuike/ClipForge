@@ -116,7 +116,7 @@ function Player({
   };
 
   return (
-    <div ref={shellRef} className="overflow-hidden rounded-card border border-ink-700 bg-black">
+    <div ref={shellRef} className="media-player overflow-hidden rounded-card border border-ink-700 bg-black">
       <div className="relative">
         <video
           ref={videoRef}
@@ -239,7 +239,7 @@ function TranscriptTab({
           <button
             key={word.id}
             type="button"
-            className="rounded px-0.5 text-slate-300 transition-colors hover:bg-accent-500/20 hover:text-white"
+            className="rounded px-0.5 text-slate-300 transition-colors hover:bg-accent-500/20 hover:text-slate-100"
             onClick={() => {
               const element = videoRef.current;
               if (element) element.currentTime = word.start_time;
@@ -631,7 +631,7 @@ export default function EditorPage() {
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold tracking-tight text-white">{data.title}</h1>
+          <h1 className="truncate text-xl font-semibold tracking-tight text-slate-100">{data.title}</h1>
           <p className="mt-1 text-sm text-slate-400">
             {formatTime(data.start_time)} → {formatTime(data.end_time)} · {data.aspect_ratio} · {data.status}
           </p>
@@ -880,7 +880,7 @@ export default function EditorPage() {
                 onClick={() => setTab(item.key)}
                 className={cn(
                   'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors',
-                  tab === item.key ? 'bg-ink-700 text-white' : 'text-slate-400 hover:text-slate-200',
+                  tab === item.key ? 'bg-ink-700 text-slate-100' : 'text-slate-400 hover:text-slate-200',
                 )}
               >
                 <item.icon className="h-3.5 w-3.5" aria-hidden />
@@ -925,7 +925,7 @@ export default function EditorPage() {
                     <li key={`${suggestion.provider}:${suggestion.text}`}>
                       <button
                         type="button"
-                        className="w-full rounded-lg border border-ink-700/70 bg-ink-900/50 px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:border-accent-500/40 hover:text-white"
+                        className="w-full rounded-lg border border-ink-700/70 bg-ink-900/50 px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:border-accent-500/40 hover:text-slate-100"
                         onClick={() => selectHeadline.mutate(suggestion.text)}
                         title={suggestion.source ? `source: ${suggestion.source}` : undefined}
                       >

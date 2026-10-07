@@ -412,6 +412,6 @@ export interface Capabilities {
   storage_backend: string;
   queue_backend: string;
   billing: Array<{ name: string; available: boolean }>;
-  processor: { enabled: boolean; url: string };
+  processor: { enabled: boolean; transport: 'internal_service' | 'in_process' };
   environment: string;
 }

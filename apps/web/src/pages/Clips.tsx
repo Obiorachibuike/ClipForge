@@ -93,7 +93,7 @@ function CandidateCard({
               </span>
             ) : null}
           </div>
-          <h3 className="mt-2 text-base font-semibold text-white">{candidate.title}</h3>
+          <h3 className="mt-2 text-base font-semibold text-slate-100">{candidate.title}</h3>
           <p className="mt-1 text-sm text-slate-400">{candidate.hook || candidate.reason}</p>
         </div>
       </div>
@@ -237,7 +237,7 @@ export default function ClipsPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">Review moments</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Review moments</h1>
           <p className="mt-1 text-sm text-slate-400">
             Each suggestion is scored from your transcript and audio. Keep what works, reject the rest.
           </p>
@@ -266,7 +266,7 @@ export default function ClipsPage() {
             onClick={() => setFilter(key)}
             className={cn(
               'rounded-pill px-3 py-1.5 text-xs font-semibold capitalize transition-colors',
-              filter === key ? 'bg-ink-700 text-white' : 'text-slate-400 hover:bg-ink-800 hover:text-slate-200',
+              filter === key ? 'bg-ink-700 text-slate-100' : 'text-slate-400 hover:bg-ink-800 hover:text-slate-200',
             )}
           >
             {key}

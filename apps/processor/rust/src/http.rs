@@ -4,9 +4,9 @@
 //! sidecar needs no client change. Command handling is CPU- and disk-bound, so
 //! each request runs on the blocking pool.
 
-use axum::Json;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
+use axum::Json;
 use axum::Router;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -74,7 +74,10 @@ where
     match tokio::task::spawn_blocking(work).await {
         Ok(Ok(value)) => (StatusCode::OK, Json(value)),
         // 422 matches how the API reports "the input cannot be processed".
-        Ok(Err(detail)) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "ok": false, "error": detail }))),
+        Ok(Err(detail)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "ok": false, "error": detail })),
+        ),
         Err(join_error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": format!("command panicked: {join_error}") })),

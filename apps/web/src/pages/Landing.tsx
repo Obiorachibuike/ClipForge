@@ -17,6 +17,8 @@ import {
   Wand2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import ClipForgeMark from '@/components/ClipForgeMark';
+import ThemeToggle from '@/components/ThemeToggle';
 import { queryKeys } from '@/lib/query';
 import { useAuthStore } from '@/stores/auth';
 import { cn, formatBytes } from '@/lib/format';
@@ -117,7 +119,7 @@ function Hero() {
             <Sparkles className="h-3 w-3" aria-hidden />
             Word-level AI clipping
           </span>
-          <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-6xl">
+          <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-slate-100 sm:text-6xl">
             Turn long videos into short-form content{' '}
             <span className="text-gradient-accent">automatically.</span>
           </h1>
@@ -150,7 +152,7 @@ function HowItWorks() {
   return (
     <section className="border-b border-ink-800 bg-ink-900/40 py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <h2 className="text-3xl font-semibold tracking-tight text-white">How it works</h2>
+        <h2 className="text-3xl font-semibold tracking-tight text-slate-100">How it works</h2>
         <p className="mt-3 max-w-2xl text-slate-400">
           Four steps, each one a real processing job you can watch and cancel — no simulated progress bars.
         </p>
@@ -170,7 +172,7 @@ function HowItWorks() {
               <p className="mt-4 text-2xs font-semibold uppercase tracking-widest text-slate-500">
                 Step {index + 1}
               </p>
-              <h3 className="mt-1 text-base font-semibold text-white">{step.title}</h3>
+              <h3 className="mt-1 text-base font-semibold text-slate-100">{step.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-400">{step.body}</p>
             </motion.div>
           ))}
@@ -184,7 +186,7 @@ function FeatureGrid() {
   return (
     <section id="features" className="border-b border-ink-800 py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <h2 className="text-3xl font-semibold tracking-tight text-white">
+        <h2 className="text-3xl font-semibold tracking-tight text-slate-100">
           Everything between raw footage and a post
         </h2>
         <div className="mt-12 grid gap-6 md:grid-cols-2">
@@ -193,7 +195,7 @@ function FeatureGrid() {
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-400">
                 <feature.icon className="h-5 w-5" aria-hidden />
               </span>
-              <h3 className="mt-4 text-lg font-semibold text-white">{feature.title}</h3>
+              <h3 className="mt-4 text-lg font-semibold text-slate-100">{feature.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-400">{feature.body}</p>
             </div>
           ))}
@@ -207,7 +209,7 @@ function Platforms() {
   return (
     <section className="border-b border-ink-800 bg-ink-900/40 py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <h2 className="text-3xl font-semibold tracking-tight text-white">Rendered for the platform</h2>
+        <h2 className="text-3xl font-semibold tracking-tight text-slate-100">Rendered for the platform</h2>
         <p className="mt-3 max-w-2xl text-slate-400">
           Export presets produce H.264/AAC MP4s at the dimensions each platform wants.
         </p>
@@ -240,7 +242,7 @@ function Pricing() {
   return (
     <section id="pricing" className="border-b border-ink-800 py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <h2 className="text-3xl font-semibold tracking-tight text-white">Pricing</h2>
+        <h2 className="text-3xl font-semibold tracking-tight text-slate-100">Pricing</h2>
         <p className="mt-3 max-w-2xl text-slate-400">
           Start free. Upgrade when the pipeline has earned it.
         </p>
@@ -261,9 +263,9 @@ function Pricing() {
                 )}
               >
                 {plan.highlighted ? <span className="badge-accent mb-3 w-fit">Most popular</span> : null}
-                <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
+                <h3 className="text-lg font-semibold text-slate-100">{plan.name}</h3>
                 <p className="mt-1 text-sm text-slate-400">{plan.tagline}</p>
-                <p className="mt-5 text-3xl font-semibold text-white">
+                <p className="mt-5 text-3xl font-semibold text-slate-100">
                   {plan.price_minor === 0 ? 'Free' : `$${(plan.price_minor / 100).toFixed(0)}`}
                   {plan.price_minor > 0 ? (
                     <span className="text-sm font-normal text-slate-500">
@@ -307,7 +309,7 @@ function Faq() {
   return (
     <section className="border-b border-ink-800 bg-ink-900/40 py-20">
       <div className="mx-auto max-w-3xl px-6">
-        <h2 className="text-3xl font-semibold tracking-tight text-white">Questions</h2>
+        <h2 className="text-3xl font-semibold tracking-tight text-slate-100">Questions</h2>
         <div className="mt-8 divide-y divide-ink-700">
           {FAQ.map((item, index) => (
             <div key={item.q}>
@@ -317,7 +319,7 @@ function Faq() {
                 onClick={() => setOpen(open === index ? null : index)}
                 aria-expanded={open === index}
               >
-                <span className="text-base font-medium text-white">{item.q}</span>
+                <span className="text-base font-medium text-slate-100">{item.q}</span>
                 <ChevronDown
                   className={cn('h-4 w-4 shrink-0 text-slate-500 transition-transform', open === index && 'rotate-180')}
                   aria-hidden
@@ -349,10 +351,10 @@ function Footer() {
     <footer className="py-12">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 sm:flex-row">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500">
-            <Sparkles className="h-3.5 w-3.5 text-white" aria-hidden />
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 shadow-[0_6px_18px_rgba(91,108,255,0.28)]">
+            <ClipForgeMark className="h-4 w-4 text-white" />
           </span>
-          <span className="text-sm font-semibold text-white">ClipForge</span>
+          <span className="text-sm font-semibold text-slate-100">ClipForge</span>
         </div>
         <div className="flex items-center gap-6 text-sm text-slate-500">
           <Link to="/pricing" className="hover:text-slate-300">
@@ -373,10 +375,10 @@ export default function Landing() {
       <header className="sticky top-0 z-40 border-b border-ink-800/80 bg-ink-950/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500">
-              <Sparkles className="h-4 w-4 text-white" aria-hidden />
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 shadow-[0_8px_24px_rgba(91,108,255,0.3)]">
+              <ClipForgeMark className="h-5 w-5 text-white" />
             </span>
-            <span className="text-base font-semibold tracking-tight text-white">ClipForge</span>
+            <span className="text-base font-semibold tracking-tight text-slate-100">ClipForge</span>
           </Link>
           <nav className="hidden items-center gap-6 text-sm text-slate-400 md:flex">
             <a href="#features" className="hover:text-slate-200">
@@ -387,6 +389,7 @@ export default function Landing() {
             </a>
           </nav>
           <div className="flex items-center gap-2">
+            <ThemeToggle className="mr-1" />
             <Link to="/login" className="btn-ghost btn-sm">
               Sign in
             </Link>

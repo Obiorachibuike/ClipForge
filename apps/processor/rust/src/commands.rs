@@ -38,7 +38,12 @@ pub fn probe(payload: &Value) -> Result<Value, String> {
 
     let raw = media::ffprobe_json(&path)?;
     let normalized = media::normalize_probe(&raw);
-    if normalized.get("duration").and_then(Value::as_f64).unwrap_or(0.0) <= 0.0 {
+    if normalized
+        .get("duration")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        <= 0.0
+    {
         // An image or a truncated file: report it rather than inventing a length.
         return Err("this file reports no duration".to_string());
     }
@@ -100,7 +105,8 @@ pub fn frames(payload: &Value) -> Result<Value, String> {
         .clamp(1, 5000);
 
     let directory = PathBuf::from(&output_dir);
-    std::fs::create_dir_all(&directory).map_err(|error| format!("could not create {output_dir}: {error}"))?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create {output_dir}: {error}"))?;
 
     let pattern = directory.join("frame_%05d.jpg");
     let filter = format!("fps={fps},scale={width}:-2");
@@ -125,7 +131,12 @@ pub fn frames(payload: &Value) -> Result<Value, String> {
         .map_err(|error| format!("could not list {output_dir}: {error}"))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|entry| entry.extension().map(|ext| ext.eq_ignore_ascii_case("jpg")).unwrap_or(false))
+        .filter(|entry| {
+            entry
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("jpg"))
+                .unwrap_or(false)
+        })
         .collect();
     files.sort();
 

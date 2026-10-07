@@ -26,7 +26,7 @@ export function SectionHeader({
   return (
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
         {description ? <p className="mt-0.5 text-sm text-slate-400">{description}</p> : null}
       </div>
       {action}
@@ -57,7 +57,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-ink-600 bg-ink-900/40 px-6 py-14 text-center">
       {icon ? <div className="text-slate-500">{icon}</div> : null}
-      <h3 className="text-base font-semibold text-white">{title}</h3>
+      <h3 className="text-base font-semibold text-slate-100">{title}</h3>
       {description ? <p className="max-w-md text-sm text-slate-400">{description}</p> : null}
       {action ? <div className="mt-1">{action}</div> : null}
     </div>
@@ -85,7 +85,7 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   return (
     <div className="rounded-xl border border-ink-700/70 bg-ink-900/60 px-4 py-3">
       <p className="text-2xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xl font-semibold text-slate-100">{value}</p>
       {hint ? <p className="mt-0.5 text-2xs text-slate-500">{hint}</p> : null}
     </div>
   );

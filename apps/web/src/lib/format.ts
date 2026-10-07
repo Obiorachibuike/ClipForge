@@ -84,6 +84,7 @@ export function percent(value: number, total: number): number {
 
 /** Human labels for job types / stages shown in progress UI. */
 export const JOB_LABELS: Record<string, string> = {
+  'video.import_url': 'Importing video',
   'video.probe': 'Inspecting media',
   'video.transcribe': 'Transcribing',
   'video.analyze_framing': 'Analysing framing',

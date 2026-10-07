@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Sparkles } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { api } from '@/lib/api';
+import ClipForgeMark from '@/components/ClipForgeMark';
+import ThemeToggle from '@/components/ThemeToggle';
 import { queryKeys } from '@/lib/query';
 import { useAuthStore } from '@/stores/auth';
 import { cn, formatBytes } from '@/lib/format';
@@ -21,19 +23,22 @@ export default function PricingPage() {
       <header className="border-b border-ink-800">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500">
-              <Sparkles className="h-4 w-4 text-white" aria-hidden />
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 shadow-[0_8px_24px_rgba(91,108,255,0.3)]">
+              <ClipForgeMark className="h-5 w-5 text-white" />
             </span>
-            <span className="text-base font-semibold tracking-tight text-white">ClipForge</span>
+            <span className="text-base font-semibold tracking-tight text-slate-100">ClipForge</span>
           </Link>
-          <Link to={status === 'authenticated' ? '/dashboard' : '/login'} className="btn-secondary btn-sm">
-            {status === 'authenticated' ? 'Dashboard' : 'Sign in'}
-          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Link to={status === 'authenticated' ? '/dashboard' : '/login'} className="btn-secondary btn-sm">
+              {status === 'authenticated' ? 'Dashboard' : 'Sign in'}
+            </Link>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight text-white">Simple pricing</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-100">Simple pricing</h1>
         <p className="mt-3 max-w-2xl text-slate-400">
           Every plan runs the same pipeline. Higher tiers raise the processing minutes, render count and storage.
         </p>
@@ -60,9 +65,9 @@ export default function PricingPage() {
                   className={cn('flex flex-col p-6', plan.highlighted && 'border-accent-500/40 shadow-glow')}
                 >
                   {plan.highlighted ? <span className="badge-accent mb-3 w-fit">Recommended</span> : null}
-                  <h2 className="text-lg font-semibold text-white">{plan.name}</h2>
+                  <h2 className="text-lg font-semibold text-slate-100">{plan.name}</h2>
                   <p className="mt-1 text-sm text-slate-400">{plan.tagline}</p>
-                  <p className="mt-5 text-3xl font-semibold text-white">
+                  <p className="mt-5 text-3xl font-semibold text-slate-100">
                     {plan.price_minor === 0 ? 'Free' : `$${(plan.price_minor / 100).toFixed(0)}`}
                     {plan.price_minor > 0 ? (
                       <span className="text-sm font-normal text-slate-500">

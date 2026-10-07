@@ -1,9 +1,21 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
+    <script>
+      (() => {
+        let saved = null;
+        try { saved = localStorage.getItem('clipforge_theme'); } catch {}
+        const theme = saved === 'light' || saved === 'dark'
+          ? saved
+          : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.classList.add(theme);
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#08080C" />
+    <link rel="icon" type="image/svg+xml" href="/signal-mark.svg" />
     <meta
       name="description"
       content="ClipForge turns long videos into short-form clips with AI clip discovery, smart framing and word-level captions."

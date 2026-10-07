@@ -8,7 +8,7 @@ export default function NotFound() {
         <Compass className="h-7 w-7" aria-hidden />
       </span>
       <div>
-        <h1 className="text-2xl font-semibold text-white">That page does not exist</h1>
+        <h1 className="text-2xl font-semibold text-slate-100">That page does not exist</h1>
         <p className="mt-2 text-sm text-slate-400">
           The link may be out of date, or the project it pointed at was deleted.
         </p>

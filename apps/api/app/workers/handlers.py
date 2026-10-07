@@ -25,6 +25,12 @@ def _transcribe(db: Session, job: Job) -> dict[str, Any]:
     return run(db, job)
 
 
+def _import_url(db: Session, job: Job) -> dict[str, Any]:
+    from app.services.remote_video import run_import
+
+    return run_import(db, job)
+
+
 def _probe(db: Session, job: Job) -> dict[str, Any]:
     from app.services.pipeline.video_jobs import run_probe
 
@@ -50,6 +56,7 @@ def _render(db: Session, job: Job) -> dict[str, Any]:
 
 
 HANDLERS: dict[str, Handler] = {
+    JobType.VIDEO_IMPORT_URL.value: _import_url,
     JobType.VIDEO_PROBE.value: _probe,
     JobType.VIDEO_TRANSCRIBE.value: _transcribe,
     JobType.VIDEO_ANALYZE_FRAMING.value: _framing,

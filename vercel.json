@@ -1,0 +1,83 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "api": {
+      "root": "apps/api",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "processor",
+          "format": "url",
+          "env": "PROCESSOR_URL"
+        }
+      ]
+    },
+    "processor": {
+      "root": "apps/processor/rust",
+      "runtime": "container",
+      "entrypoint": "Dockerfile",
+      "command": [
+        "clipforge-processor",
+        "serve",
+        "0.0.0.0:80"
+      ]
+    },
+    "web": {
+      "root": "apps/web",
+      "framework": "vite",
+      "outputDirectory": "dist"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/ws/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/healthz",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/readyz",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/openapi.json",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/docs",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/docs/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
+}

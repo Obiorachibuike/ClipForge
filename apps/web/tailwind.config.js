@@ -5,17 +5,26 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Premium dark-first palette: charcoal/near-black surfaces, restrained
-        // blue/purple accents, high-contrast typography.
+        // Semantic surface and text scales are CSS-variable backed so every
+        // existing utility switches cleanly when the root theme class changes.
         ink: {
-          950: '#06060A',
-          900: '#0A0A10',
-          850: '#0E0E16',
-          800: '#12121C',
-          700: '#1A1A26',
-          600: '#242433',
-          500: '#33334A',
-          400: '#4A4A66',
+          950: 'rgb(var(--ink-950) / <alpha-value>)',
+          900: 'rgb(var(--ink-900) / <alpha-value>)',
+          850: 'rgb(var(--ink-850) / <alpha-value>)',
+          800: 'rgb(var(--ink-800) / <alpha-value>)',
+          700: 'rgb(var(--ink-700) / <alpha-value>)',
+          600: 'rgb(var(--ink-600) / <alpha-value>)',
+          500: 'rgb(var(--ink-500) / <alpha-value>)',
+          400: 'rgb(var(--ink-400) / <alpha-value>)',
+        },
+        slate: {
+          50: 'rgb(var(--slate-50) / <alpha-value>)',
+          100: 'rgb(var(--slate-100) / <alpha-value>)',
+          200: 'rgb(var(--slate-200) / <alpha-value>)',
+          300: 'rgb(var(--slate-300) / <alpha-value>)',
+          400: 'rgb(var(--slate-400) / <alpha-value>)',
+          500: 'rgb(var(--slate-500) / <alpha-value>)',
+          600: 'rgb(var(--slate-600) / <alpha-value>)',
         },
         accent: {
           DEFAULT: '#5B6CFF',
@@ -64,15 +73,15 @@ export default {
         pill: '999px',
       },
       boxShadow: {
-        glow: '0 0 0 1px rgba(91,108,255,0.25), 0 8px 40px -12px rgba(91,108,255,0.45)',
-        card: '0 1px 0 0 rgba(255,255,255,0.03) inset, 0 12px 32px -18px rgba(0,0,0,0.9)',
-        float: '0 24px 60px -24px rgba(0,0,0,0.95)',
+        glow: 'var(--shadow-glow)',
+        card: 'var(--shadow-card)',
+        float: 'var(--shadow-float)',
       },
       backgroundImage: {
         'grid-dark':
-          'linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)',
+          'linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px)',
         'hero-glow':
-          'radial-gradient(60% 60% at 50% 0%, rgba(91,108,255,0.28) 0%, rgba(124,92,255,0.12) 40%, rgba(6,6,10,0) 75%)',
+          'radial-gradient(60% 60% at 50% 0%, var(--hero-glow-strong) 0%, var(--hero-glow-soft) 40%, transparent 75%)',
         'accent-line': 'linear-gradient(90deg, #5B6CFF 0%, #7C5CFF 60%, #34D399 100%)',
       },
       backgroundSize: {
