@@ -128,7 +128,7 @@ fn print_usage() {
          \n\
          USAGE:\n    \
          clipforge-processor serve [ADDRESS]     HTTP service (default {DEFAULT_ADDRESS})\n    \
-         clipforge-processor health              {\"ok\": true} when the service is usable\n    \
+         clipforge-processor health              {{\"ok\": true}} when the service is usable\n    \
          clipforge-processor probe               {{\"path\": \"...\"}} -> stream metadata\n    \
          clipforge-processor waveform            {{\"path\": \"...\", \"buckets\": 400}} -> peaks\n    \
          clipforge-processor frames              {{\"path\": \"...\", \"output_dir\": \"...\"}}\n\
