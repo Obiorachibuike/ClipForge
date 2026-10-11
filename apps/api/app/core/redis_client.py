@@ -1,12 +1,13 @@
-"""Redis access with an explicit availability probe.
+"""Redis access with an explicit availability probe and recoverable failures.
 
-The platform is designed to run with PostgreSQL + Redis (docker compose), but
-must also be usable on a single small box without Redis. Components ask this
-module for a client; when it returns None they use their in-process fallback.
+Production can require Redis for its durable job queue. Development may opt in
+to in-process fallbacks, but failed startup probes are retried so a temporary
+Redis outage does not pin a long-lived API process to "unavailable" forever.
 """
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 from app.core.config import settings
@@ -18,6 +19,8 @@ _lock = threading.Lock()
 _client: Any = None
 _probed = False
 _available: bool | None = None
+_last_probe = 0.0
+_PROBE_RETRY_SECONDS = 5.0
 
 
 def _build_client():  # noqa: ANN202
@@ -33,25 +36,28 @@ def _build_client():  # noqa: ANN202
 
 
 def redis_available() -> bool:
-    global _probed, _available
+    global _probed, _available, _last_probe
+    now = time.monotonic()
     with _lock:
-        if _available is not None and _probed:
-            return _available
+        if _available is True and _probed:
+            return True
+        if _available is False and _probed and now - _last_probe < _PROBE_RETRY_SECONDS:
+            return False
         if settings.queue_backend == "memory" and settings.cache_backend == "memory":
-            _probed, _available = True, False
+            _probed, _available, _last_probe = True, False, now
             return False
         try:
             client = _build_client()
             client.ping()
-            _probed, _available = True, True
+            _probed, _available, _last_probe = True, True, now
         except Exception as exc:
-            log.info("redis.unavailable", error=str(exc), detail="using in-process fallbacks")
-            _probed, _available = True, False
+            log.info("redis.unavailable", error=str(exc), detail="using in-process fallbacks where configured")
+            _probed, _available, _last_probe = True, False, now
     return bool(_available)
 
 
 def get_redis():
-    """Return a live redis client or None when Redis is not usable."""
+    """Return a live redis client or None when Redis is not currently usable."""
     global _client
     if not redis_available():
         return None
@@ -68,6 +74,6 @@ def get_redis():
 
 def reset_redis_state() -> None:
     """Test helper."""
-    global _client, _probed, _available
+    global _client, _probed, _available, _last_probe
     with _lock:
-        _client, _probed, _available = None, False, None
+        _client, _probed, _available, _last_probe = None, False, None, 0.0

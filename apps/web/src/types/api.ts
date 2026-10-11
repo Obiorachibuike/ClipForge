@@ -413,5 +413,6 @@ export interface Capabilities {
   queue_backend: string;
   billing: Array<{ name: string; available: boolean }>;
   processor: { enabled: boolean; transport: 'internal_service' | 'in_process' };
+  worker_mode: 'external' | 'inline' | 'disabled';
   environment: string;
 }

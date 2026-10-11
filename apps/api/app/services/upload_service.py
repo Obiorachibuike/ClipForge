@@ -1,45 +1,51 @@
-"""Chunked, resumable upload handling.
+"""Chunked, resumable uploads backed by the configured object-storage backend.
 
-Chunks are appended to a server-side staging file at their byte offset, so
-uploads can arrive out of order (parallel chunk sending from the browser) and
-resume after a dropped connection. The final object is streamed into storage
-once, which keeps large videos off the API's memory and out of the database.
+Each validated chunk is stored as its own object so separate serverless API
+invocations never depend on a shared temporary filesystem. The queued probe job
+assembles those objects on the processing worker, writes the source object to
+shared storage, then continues through the existing media pipeline.
 """
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import shutil
+import tempfile
 import uuid
 from datetime import timedelta
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models import (
+    Job,
+    JobStatus,
     JobType,
     Project,
     ProjectStatus,
     UploadSession,
     UploadStatus,
+    UsageRecord,
     User,
     Video,
     VideoStatus,
+    as_utc,
     utcnow,
 )
 from app.services import events as ev
 from app.services.job_service import JobService
-from app.services.storage import get_storage, safe_filename
+from app.services.queue import get_queue
+from app.services.storage import RangeSpec, get_storage, safe_filename
 from app.services.usage_service import UsageService
 
 log = get_logger(__name__)
 
-STAGING_ROOT = Path(settings.storage_local_root).expanduser().resolve().parent / "uploads"
+STAGING_ROOT = Path(tempfile.gettempdir()) / "clipforge" / "uploads"
 MIN_CHUNK = 256 * 1024
-MAX_CHUNK = 64 * 1024 * 1024
+MAX_CHUNK = 4 * 1024 * 1024  # below Vercel's per-function request-body ceiling
 
 # Magic-byte signatures for the containers we accept. Extensions alone are not
 # trusted: a file must also look like the media type it claims to be.
@@ -164,7 +170,6 @@ class UploadService:
         project.status = ProjectStatus.UPLOADING.value
         db.commit()
         db.refresh(session)
-        _staging_path(upload_id).parent.mkdir(parents=True, exist_ok=True)
         log.info(
             "upload.initialised",
             upload_id=upload_id,
@@ -185,30 +190,23 @@ class UploadService:
             raise ValidationError(f"Chunk index {index} is out of range.", field="index")
         if len(data) == 0:
             raise ValidationError("Empty chunk received.", field="chunk")
-        if len(data) > session.chunk_size:
-            raise ValidationError("Chunk exceeds the negotiated chunk size.", field="chunk")
-        expected_last = session.size_bytes - session.chunk_size * (session.total_chunks - 1)
-        if index < session.total_chunks - 1 and len(data) != session.chunk_size:
-            # Allow a short non-final chunk only if it fills exactly the remaining bytes.
-            remaining_before = session.size_bytes - index * session.chunk_size
-            if len(data) > remaining_before:
-                raise ValidationError("Chunk does not match the agreed chunk size.", field="chunk")
 
-        path = _staging_path(upload_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            with open(path, "wb") as handle:
-                handle.truncate(session.size_bytes)
-        with open(path, "r+b") as handle:
-            handle.seek(index * session.chunk_size)
-            handle.write(data)
-
-        received = dict(session.received_chunks or {})
+        expected_size = min(session.chunk_size, session.size_bytes - index * session.chunk_size)
+        if len(data) != expected_size:
+            raise ValidationError(
+                f"Chunk {index} must contain exactly {expected_size} bytes.", field="chunk"
+            )
         key = str(index)
-        if key not in received:
-            received[key] = len(data)
-            session.received_chunks = received
-            session.received_bytes = int(sum(received.values()))
+        received = dict(session.received_chunks or {})
+        if key in received and int(received[key]) != len(data):
+            raise ConflictError("A retry changed the size of an already received chunk.", code="upload_chunk_conflict")
+
+        # Persist the chunk under a stable, generated object key. This is safe
+        # across Vercel invocations and can be read by a worker on another host.
+        get_storage().put_bytes(upload_part_key(session, index), data, "application/octet-stream")
+        received[key] = len(data)
+        session.received_chunks = received
+        session.received_bytes = int(sum(int(size) for size in received.values()))
         session.status = UploadStatus.IN_PROGRESS.value
         db.commit()
 
@@ -240,11 +238,9 @@ class UploadService:
         max_bytes: int | None = None,
         chunk_bytes: int = 1024 * 1024,
     ) -> UploadSession:
-        """Stream a whole file into staging for the single-request upload path.
-
-        The file is read in bounded chunks and written straight to disk: it is
-        never held in memory, and the size ceiling is enforced while streaming so
-        an oversized upload is rejected before it fills the volume.
+        """Stream the one-request convenience upload to a temporary file, then
+        persist it as the first storage-backed chunk. The video itself is still
+        assembled by the worker after the request returns.
         """
         session = UploadService._session(db, user, upload_id)
         if session.status in (UploadStatus.COMPLETED.value, UploadStatus.ABORTED.value):
@@ -278,6 +274,14 @@ class UploadService:
         if head and not looks_like_media(head, session.filename):
             log.warning("upload.unrecognised_container", upload_id=upload_id, mode="stream", head=head[:16])
 
+        # This path is intended for smaller one-request uploads. The file is
+        # stored as one object part; the worker will materialize the full source.
+        try:
+            UsageService.check_upload(db, user, written)
+            get_storage().put_file(upload_part_key(session, 0), path, session.content_type)
+        finally:
+            path.unlink(missing_ok=True)
+
         # A streamed upload is one complete part as far as bookkeeping is concerned.
         session.size_bytes = written
         session.chunk_size = max(written, 1)
@@ -309,110 +313,133 @@ class UploadService:
     # ------------------------------------------------------------ complete ---
     @staticmethod
     def complete_upload(db: Session, user: User, upload_id: str) -> tuple[Video, UploadSession, "object"]:
-        session = UploadService._session(db, user, upload_id)
-        if session.status == UploadStatus.COMPLETED.value and session.video_id:
-            video = db.get(Video, session.video_id)
+        session = UploadService._session(db, user, upload_id, for_update=True)
+        video = db.get(Video, session.video_id) if session.video_id else None
+        if video is None:
+            raise NotFoundError("Video record not found.", code="video_not_found")
+
+        if session.status == UploadStatus.COMPLETED.value:
+            # Completion is idempotent even after the probe reaches a terminal
+            # state. A row lock prevents concurrent retries from creating two
+            # assembly jobs for the same upload.
+            probe_jobs = list(
+                db.execute(
+                    select(Job)
+                    .where(Job.video_id == video.id, Job.type == JobType.VIDEO_PROBE.value)
+                    .order_by(Job.created_at)
+                ).scalars()
+            )
+            # New probe jobs carry their upload id. Fall back to the oldest
+            # legacy probe row for uploads completed before that field existed.
+            existing = next(
+                (item for item in probe_jobs if (item.payload or {}).get("upload_id") == upload_id),
+                None,
+            )
+            if existing is None:
+                existing = next(
+                    (item for item in probe_jobs if not (item.payload or {}).get("upload_id")),
+                    None,
+                )
+            if existing is not None:
+                _record_upload_usage(db, user, session, video, existing)
+                _ensure_job_enqueued(existing)
+                return video, session, existing
             job = JobService.create(
                 db,
                 type_=JobType.VIDEO_PROBE.value,
-                payload={"video_id": video.id},
+                payload={"video_id": video.id, "upload_id": upload_id},
                 user_id=user.id,
                 project_id=session.project_id,
                 video_id=video.id,
                 priority=10,
+                enqueue=False,
             )
+            session = UploadService._session(db, user, upload_id, for_update=True)
+            _record_upload_usage(db, user, session, video, job)
+            _ensure_job_enqueued(job)
             return video, session, job
 
-        missing = [
-            index for index in range(session.total_chunks) if str(index) not in (session.received_chunks or {})
-        ]
+        received = dict(session.received_chunks or {})
+        missing = [index for index in range(session.total_chunks) if str(index) not in received]
         if missing:
             raise ConflictError(
                 f"Upload is incomplete: {len(missing)} of {session.total_chunks} chunks are missing.",
                 code="upload_incomplete",
             )
 
-        path = _staging_path(upload_id)
-        if not path.exists():
-            raise NotFoundError("Staged upload data is missing. Please restart the upload.", code="upload_data_missing")
-        actual_size = path.stat().st_size
-        if actual_size != session.size_bytes:
+        storage = get_storage()
+        actual_size = 0
+        for index in range(session.total_chunks):
+            expected_size = min(session.chunk_size, session.size_bytes - index * session.chunk_size)
+            if int(received[str(index)]) != expected_size:
+                raise ConflictError(
+                    f"Chunk {index} has an unexpected size; please retry that chunk.",
+                    code="upload_size_mismatch",
+                )
+            try:
+                part = storage.stat(upload_part_key(session, index))
+            except Exception as exc:
+                raise NotFoundError(
+                    f"Stored upload chunk {index} is missing. Please retry the upload.",
+                    code="upload_data_missing",
+                ) from exc
+            if part.size != expected_size:
+                raise ConflictError(
+                    f"Stored upload chunk {index} is incomplete; please retry that chunk.",
+                    code="upload_size_mismatch",
+                )
+            actual_size += part.size
+
+        if actual_size != session.size_bytes or int(session.received_bytes) != actual_size:
             raise ConflictError(
                 f"Uploaded size ({actual_size} bytes) does not match the declared size ({session.size_bytes} bytes).",
                 code="upload_size_mismatch",
             )
 
-        with open(path, "rb") as handle:
-            head = handle.read(64)
-        if not looks_like_media(head, session.filename):
+        # The API has persisted every chunk in shared storage. It intentionally
+        # does not join large files in the serverless request: the worker will
+        # assemble and probe the source after it claims this job.
+        try:
+            head = storage.read_bytes(upload_part_key(session, 0), byte_range=RangeSpec(0, min(63, actual_size - 1)))
+        except Exception:
+            head = b""
+        if head and not looks_like_media(head, session.filename):
             log.warning("upload.unrecognised_container", upload_id=upload_id, head=head[:16])
-            # Not fatal: many valid streams start with data we do not fingerprint,
-            # and the probe job will reject anything unreadable.
 
-        checksum = _sha256(path, limit_bytes=256 * 1024 * 1024)
-        storage = get_storage()
-        video = db.get(Video, session.video_id) if session.video_id else None
-        if video is None:
-            raise NotFoundError("Video record not found.", code="video_not_found")
-
-        storage.put_file(session.storage_key, path, session.content_type or "video/mp4")
         video.storage_key = session.storage_key
         video.size_bytes = actual_size
-        video.checksum = checksum
+        video.checksum = ""  # calculated by the worker while it assembles the source
         video.status = VideoStatus.UPLOADED.value
         session.status = UploadStatus.COMPLETED.value
-        db.commit()
-
-        # Staged chunks are no longer needed.
-        path.unlink(missing_ok=True)
-
         project = db.get(Project, session.project_id)
         if project:
             project.status = ProjectStatus.PROCESSING.value
-            db.commit()
 
+        # JobService commits this row with the completed upload session while
+        # its row lock is still held. Enqueue afterwards so duplicate completion
+        # requests cannot race into separate probe/assembly jobs.
         job = JobService.create(
             db,
             type_=JobType.VIDEO_PROBE.value,
-            payload={"video_id": video.id},
+            payload={"video_id": video.id, "upload_id": upload_id},
             user_id=user.id,
             project_id=session.project_id,
             video_id=video.id,
             priority=10,
+            enqueue=False,
         )
-        UsageService.record(
-            db,
-            user_id=user.id,
-            metric="videos_uploaded",
-            quantity=1,
-            unit="videos",
-            project_id=session.project_id,
-            video_id=video.id,
-            job_id=job.id,
-        )
-        UsageService.record(
-            db,
-            user_id=user.id,
-            metric="storage_bytes",
-            quantity=float(actual_size),
-            unit="bytes",
-            project_id=session.project_id,
-            video_id=video.id,
-            job_id=job.id,
-        )
-        log.info(
-            "upload.completed",
-            upload_id=upload_id,
-            video_id=video.id,
-            bytes=actual_size,
-            seconds=round(session.created_at.timestamp() and 0, 1),
-        )
+        session = UploadService._session(db, user, upload_id, for_update=True)
+        _record_upload_usage(db, user, session, video, job)
+        _ensure_job_enqueued(job)
+        log.info("upload.completed", upload_id=upload_id, video_id=video.id, bytes=actual_size)
         return video, session, job
 
     # --------------------------------------------------------------- abort ---
     @staticmethod
     def abort(db: Session, user: User, upload_id: str, *, delete_video: bool = True) -> UploadSession:
         session = UploadService._session(db, user, upload_id)
+        if session.status == UploadStatus.COMPLETED.value:
+            raise ConflictError("A completed upload is already queued for processing.", code="upload_closed")
         session.status = UploadStatus.ABORTED.value
         _staging_path(upload_id).unlink(missing_ok=True)
         storage = get_storage()
@@ -430,10 +457,11 @@ class UploadService:
 
     # ------------------------------------------------------------- helpers ---
     @staticmethod
-    def _session(db: Session, user: User, upload_id: str) -> UploadSession:
-        session = (
-            db.query(UploadSession).filter(UploadSession.upload_id == upload_id).one_or_none()
-        )
+    def _session(db: Session, user: User, upload_id: str, *, for_update: bool = False) -> UploadSession:
+        query = db.query(UploadSession).filter(UploadSession.upload_id == upload_id)
+        if for_update:
+            query = query.with_for_update()
+        session = query.one_or_none()
         if session is None:
             raise NotFoundError("Upload session not found.", code="upload_not_found")
         if session.user_id != user.id:
@@ -442,25 +470,69 @@ class UploadService:
         return session
 
 
+def _record_upload_usage(db: Session, user: User, session: UploadSession, video: Video, job: Job) -> None:
+    """Write upload counters once, including recovery after a partial request failure."""
+    metrics = (
+        ("videos_uploaded", 1.0, "videos"),
+        ("storage_bytes", float(session.size_bytes), "bytes"),
+    )
+    added: list[tuple[str, str]] = []
+    for metric, quantity, unit in metrics:
+        exists = db.execute(
+            select(UsageRecord.id).where(UsageRecord.job_id == job.id, UsageRecord.metric == metric)
+        ).scalar_one_or_none()
+        if exists is not None:
+            continue
+        UsageService.record(
+            db,
+            user_id=user.id,
+            metric=metric,
+            quantity=quantity,
+            unit=unit,
+            project_id=session.project_id,
+            video_id=video.id,
+            job_id=job.id,
+            commit=False,
+        )
+        added.append((metric, unit))
+    if not added:
+        return
+    db.commit()
+    totals = UsageService.totals(db, user.id)
+    for metric, unit in added:
+        ev.get_event_bus().emit(
+            ev.EVENT_USAGE_UPDATED,
+            user_id=user.id,
+            project_id=session.project_id,
+            payload={"metric": metric, "total": totals.get(metric, 0.0), "unit": unit},
+        )
+
+
+def _ensure_job_enqueued(job: Job) -> None:
+    """Repair a committed queued row if enqueue previously failed after commit."""
+    if job.status not in (JobStatus.QUEUED.value, JobStatus.RETRYING.value):
+        return
+    queue = get_queue()
+    if queue.is_queued(job.id) or queue.is_active(job.id):
+        return
+    delay = max(0.0, (as_utc(job.run_after) - utcnow()).total_seconds()) if job.run_after else 0.0
+    queue.enqueue(job.id, priority=job.priority, delay_seconds=delay)
+
+
+def upload_part_key(session: UploadSession, index: int) -> str:
+    """Stable storage object key for one validated upload chunk."""
+    if index < 0 or index >= session.total_chunks:
+        raise ValidationError("Invalid upload chunk index.", field="index")
+    return f"{session.parts_prefix}/{index:08d}.part"
+
+
 def _staging_path(upload_id: str) -> Path:
-    # upload_id is a generated hex string; validate defensively anyway.
+    # Used only for the single-request convenience path, never for resumable
+    # chunks or as a dependency shared between the API and processing worker.
     safe = "".join(ch for ch in upload_id if ch.isalnum() or ch in "-_")[:64]
     if not safe:
         raise ValidationError("Invalid upload identifier.", field="upload_id")
     return STAGING_ROOT / f"{safe}.part"
-
-
-def _sha256(path: Path, limit_bytes: int) -> str:
-    digest = hashlib.sha256()
-    remaining = limit_bytes
-    with open(path, "rb") as handle:
-        while remaining > 0:
-            chunk = handle.read(min(4 * 1024 * 1024, remaining))
-            if not chunk:
-                break
-            digest.update(chunk)
-            remaining -= len(chunk)
-    return digest.hexdigest()
 
 
 def staging_usage_bytes() -> int:

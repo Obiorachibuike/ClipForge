@@ -385,7 +385,7 @@ export default function SettingsPage() {
       <Card>
         <SectionHeader
           title="Deployment capabilities"
-          description="What this server can actually run. Absent features are reported as absent."
+          description="Capabilities reflect this API and its configured Docker processing worker."
         />
         {caps ? (
           <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
@@ -425,9 +425,10 @@ export default function SettingsPage() {
                 detail={caps.embeddings.note}
               />
             </div>
-            <div className="sm:col-span-2 mt-3 grid gap-3 sm:grid-cols-4">
+            <div className="sm:col-span-2 mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <Stat label="Storage" value={titleCase(caps.storage_backend)} />
               <Stat label="Queue" value={titleCase(caps.queue_backend)} />
+              <Stat label="Processing worker" value={titleCase(caps.worker_mode)} />
               <Stat label="Environment" value={titleCase(caps.environment)} />
               <Stat
                 label="Rust processor"
@@ -441,7 +442,7 @@ export default function SettingsPage() {
         {!caps?.media_pipeline ? (
           <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.07] px-4 py-3 text-sm text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            FFmpeg is not available, so media jobs will fail. Set MEDIA_FFMPEG_PATH or install imageio-ffmpeg.
+            No local FFmpeg or configured processing worker is available. Set WORKER_EXTERNAL=true after deploying the Docker worker, or install FFmpeg for an inline worker.
           </p>
         ) : null}
       </Card>

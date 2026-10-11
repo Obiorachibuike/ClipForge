@@ -92,15 +92,20 @@ request per project.
 ### Videos and uploads `/uploads`, `/videos`
 ```
 POST /uploads/init        → upload_id, chunk_size, total_chunks, received_chunks
-PUT  /uploads/{id}/chunk/{index}     raw bytes, 256 KiB – 64 MiB per chunk
+PUT  /uploads/{id}/chunk/{index}     raw bytes, 256 KiB – 4 MiB per chunk
 GET  /uploads/{id}        → status, received_chunks (resume from these)
 POST /uploads/{id}/complete          → { video, job }
 DELETE /uploads/{id}                 → cancel and discard
 ```
-`POST /projects/{id}/videos` accepts a single multipart file for small uploads.
+`POST /projects/{id}/videos` accepts a single multipart file up to the negotiated
+4 MiB chunk size; larger files use the resumable endpoints.
 `GET /videos/{id}/stream` is range-enabled; `POST /videos/{id}/signed-url`
-returns a time-limited storage URL. Chunk uploads are idempotent by index, so a
-retry after a dropped connection is always safe.
+returns a time-limited storage URL. Each chunk is persisted as an object under
+the session's storage prefix; `/complete` validates the parts and queues the
+probe job without assembling a full source inside the API function. The worker
+assembles the ordered parts in its own workspace and writes the source object
+through shared storage. Chunk uploads are idempotent by index, so a retry after
+a dropped connection is always safe.
 
 ### Transcripts `/projects/{id}/transcript`, `/transcripts/{id}`
 `POST /videos/{id}/transcribe` (optional `{ script }` for alignment),

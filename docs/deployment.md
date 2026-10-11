@@ -8,34 +8,95 @@ services:
 | Service | Root | Exposure | Notes |
 | --- | --- | --- | --- |
 | `web` | `apps/web` | Public catch-all `/(.*)` | Vite SPA |
-| `api` | `apps/api` | Public `/api/*`, `/ws/*`, health and API docs | FastAPI (`app.main:app`) |
-| `processor` | `apps/processor/rust` | Internal only | Rust/FFmpeg container |
+| `api` | `apps/api` | Public `/api/*`, `/ws/*`, health and API docs | FastAPI (`app.main:app`); installs only `apps/api/requirements.txt` |
+| `processor` | `apps/processor/rust` | Internal only | Optional Rust media sidecar |
 
-The `api` service declares a service binding to `processor`. Vercel injects its
-internal base URL as `PROCESSOR_URL`; **do not create that variable manually**.
-Set `PROCESSOR_ENABLED=true` if you want the optional sidecar used. The Python
-pipeline continues locally when the sidecar is disabled or unavailable.
+The API service binds to the Rust `processor` service and Vercel injects
+`PROCESSOR_URL`; do not create that variable manually. This binding does **not**
+run background jobs and is not a substitute for the processing worker. Keep
+`PROCESSOR_ENABLED=true` only when that optional acceleration is configured for
+its caller; Python implementations remain available as fallbacks.
 
-Run the multi-service topology locally with:
+### API and processing worker are separate deployments
+
+Vercel hosts the HTTP/API service only. It validates requests, writes upload
+parts and job metadata, enqueues job IDs in Redis, and serves status/progress.
+It does not run `VIDEO_PROBE`, transcription, discovery, framing or rendering.
+Run the existing Docker-compatible worker image on a separate container runtime
+that can reach the **same** PostgreSQL, Redis and S3-compatible bucket as Vercel.
+No local filesystem is shared between Vercel and the worker.
+
+The root `infrastructure/Dockerfile.api` is intentionally the shared full API /
+worker image. It installs `apps/api/requirements-worker.txt`, which includes the
+API requirements plus URL-ingestion and media-processing dependencies. Vercel's
+FastAPI service remains rooted at `apps/api` and discovers only
+`apps/api/requirements.txt`; do not point it at the worker or development
+requirements files. `apps/api/requirements-dev.txt` is for local tests and
+includes the full worker set plus test tools.
+
+On Vercel, configure these environment variables in the project (secrets should
+be stored in Vercel's environment settings, not in the repository):
+
+- `ENVIRONMENT=production`, `SECRET_KEY`, `JWT_SECRET`, `ENCRYPTION_KEY`
+- `DATABASE_URL` for PostgreSQL and `AUTO_CREATE_TABLES` according to the
+  migration process below
+- `QUEUE_BACKEND=redis`, `REDIS_URL` for the durable shared job queue;
+  `CACHE_BACKEND=redis` and the same `REDIS_URL` for shared cache/rate-limit and
+  event fan-out behavior
+- `STORAGE_BACKEND=s3` and the appropriate `S3_BUCKET`, `S3_REGION`,
+  `S3_ENDPOINT` (when not AWS), `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and
+  `S3_PATH_STYLE` values
+- `WORKER_INLINE=false` and `WORKER_EXTERNAL=true` to keep media execution out
+  of Vercel while reporting worker-side media capabilities to the UI
+- `COOKIE_SECURE=true`, `FRONTEND_URL`, and `CORS_ORIGINS` for the HTTPS app
+  origin
+- AI provider credentials/settings needed by your product. Configure the same
+  provider environment on the worker so jobs can use the configured providers.
+
+The Docker worker needs matching `DATABASE_URL`, `REDIS_URL`, `QUEUE_BACKEND`,
+`STORAGE_BACKEND`, `S3_*`, and AI settings. Its `WORKER_INLINE` must be false.
+Build it from the repository root and start the worker command on your container
+platform:
+
+```bash
+docker build -f infrastructure/Dockerfile.api -t clipforge-worker .
+docker run --rm --env-file /path/to/worker.env clipforge-worker python -m app.workers.worker
+```
+
+`worker.env` is deployment-specific and must not be committed. Use endpoints
+reachable from both Vercel and the container, rather than the Compose-only
+`postgres`, `redis`, or `minio` hostnames. A container platform may instead set
+the same variables through its secret/environment interface. Scale worker
+replicas independently; all replicas pull from Redis and read/write the common
+object store.
+
+The API persists each resumable chunk as a separate object beneath the upload
+session's parts prefix. `/complete` verifies those objects and queues a probe
+job containing the upload ID; it does not concatenate the source in a Vercel
+function. The worker assembles the parts into its own temporary workspace,
+uploads the finished source object through the same storage abstraction, then
+runs the existing probe and media pipeline. The negotiated default chunk is
+4 MiB to fit Vercel function request-body limits; clients must use the returned
+`chunk_size`. The single-request multipart route is only a small-upload
+convenience, not the path for large Vercel uploads.
+
+Vercel filesystems are ephemeral. Do not use SQLite or local media storage for
+this topology. URL imports run on the worker and need outbound access to the
+source platform; private/authenticated videos are intentionally not accepted.
+The Vercel-only processor binding is not automatically available to a worker on
+another network. If using the Rust accelerator from the worker, configure a
+worker-reachable `PROCESSOR_URL` (or colocate its CLI binary and workspace); if
+not, the complete Python media implementation remains active.
+
+Run the Vercel multi-service topology locally with:
 
 ```bash
 vercel dev -L
 ```
 
-For a real deployment, configure at least `SECRET_KEY`, `JWT_SECRET`,
-`ENCRYPTION_KEY`, `DATABASE_URL`, `STORAGE_BACKEND=s3`, and the relevant `S3_*`
-values in the Vercel project. Vercel filesystems are ephemeral, so SQLite and
-local media storage are suitable only for a local smoke test. Set
-`ENVIRONMENT=production`, `COOKIE_SECURE=true`, `FRONTEND_URL` and
-`CORS_ORIGINS` to the deployment's HTTPS origin. URL imports also need outbound
-access to the source platform; private/authenticated videos are intentionally
-not accepted.
-
-> The Rust processor currently receives local workspace paths from the Python
-> pipeline. Separate Vercel services do not share a filesystem, so media calls
-> safely fall back to Python until the processor contract is changed to use
-> signed object-storage URLs. Its health endpoint and binding still work, and it
-> remains private because no top-level rewrite targets it.
+A successful local preview or static configuration check does not prove that a
+Vercel production deployment fits its function bundle limit. Confirm the actual
+build output and deployed function size in Vercel after deployment.
 
 ## Docker Compose
 
@@ -47,62 +108,72 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # JWT_SECRET
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. That single command starts all eight services:
+Open <http://localhost:8080>. That command starts the web app, API, worker,
+PostgreSQL, Redis, MinIO object storage and the optional Rust processor:
 
 | Service | Port | Notes |
 | --- | --- | --- |
 | `web` | `${WEB_PORT:-8080}` → 80 | nginx serving the built SPA and proxying `/api`, `/ws` |
-| `api` | `${API_PORT:-8000}` → 8000 | FastAPI; runs an inline worker pool by default |
+| `api` | `${API_PORT:-8000}` → 8000 | FastAPI; uses Redis/object storage and does not process media by default |
 | `worker` | – | Dedicated job runner, scaled with `--scale worker=N` |
 | `postgres` | internal | Metadata only |
-| `redis` | internal | Queue, pub/sub, rate limits |
+| `redis` | internal | Durable queue, pub/sub and cache |
 | `minio` | `${MINIO_PORT:-9000}`, console `9001` | S3-compatible object storage |
 | `minio-init` | – | Creates the bucket once, then exits |
 | `processor` | internal | Optional Rust sidecar |
 
 `docker compose ps` shows health; `docker compose logs -f worker` follows job
-output. Wait for `minio-init` to finish before the first upload.
+output. Wait for `minio-init` to finish before the first upload. The API does not
+mount the worker scratch volume: API-to-worker media transfer uses MinIO/S3.
+Compose mounts scratch only into the worker and optional local Rust sidecar so
+the sidecar can read that worker's temporary workspace. Compose uses the
+dedicated worker by default. For a local single-container experiment, set
+`API_WORKER_INLINE=true` and `API_WORKER_EXTERNAL=false`.
 
 ### First upload
 
 1. Register at <http://localhost:8080/register>.
-2. Create a project, upload a video. It streams in chunks and never buffers the
-   whole file in memory.
-3. Watch the job progress: the WebSocket drives it live, REST recovers it after a
-   refresh.
+2. Create a project and upload a video. The browser sends resumable chunks to
+   storage; the worker assembles the full source before probing it.
+3. Watch job progress: WebSocket events drive it live, and REST resynchronizes it
+after a refresh.
 
-Without ASR weights and without an API key, transcription will report what is
-missing instead of inventing a transcript. Either paste a narration script on the
-project page (real DTW alignment produces word timings) or set `OPENAI_API_KEY`.
+Without ASR weights and without an API key, transcription reports what is
+missing instead of inventing a transcript. Either paste a narration script on
+the project page (real DTW alignment produces word timings) or configure a
+hosted transcription provider.
 
 ## Configuration
 
-Everything is environment-driven; `.env.example` documents every variable with
-its default. The ones that matter most in production:
+Everything is environment-driven; `.env.example` documents the variables with
+their development defaults. Production requires a durable shared queue and
+object store:
 
 | Variable | Why |
 | --- | --- |
-| `SECRET_KEY`, `JWT_SECRET` | Required. Compose refuses to start without `SECRET_KEY`. |
-| `ENCRYPTION_KEY` | Fernet key for provider API keys at rest. Derive from `SECRET_KEY` if unset. |
-| `COOKIE_SECURE=true` | Required behind HTTPS, or the session cookie leaks over HTTP. |
+| `SECRET_KEY`, `JWT_SECRET` | Random application secrets; Compose refuses to start without `SECRET_KEY`. |
+| `ENCRYPTION_KEY` | Fernet key for provider API keys at rest. |
+| `COOKIE_SECURE=true` | Required behind HTTPS. |
 | `CORS_ORIGINS` | Must include the public origin. |
-| `STORAGE_BACKEND`, `S3_*` | `s3` in compose (MinIO/R2/S3). `auto` probes before adopting S3. |
-| `DATABASE_URL` | PostgreSQL in compose; SQLite works for a single-box trial. |
-| `WORKER_CONCURRENCY`, `RENDER_CONCURRENCY` | Throughput vs. CPU. Rendering is the expensive one. |
-| `MEDIA_MAX_UPLOAD_BYTES` | Also reflected in plan limits. |
-| `PROCESSOR_ENABLED` | Enable the Rust sidecar; the app works without it. |
+| `DATABASE_URL` | PostgreSQL is required for API/worker coordination. |
+| `QUEUE_BACKEND=redis`, `REDIS_URL` | Durable shared job queue; production never falls back to process-local memory. |
+| `STORAGE_BACKEND=s3`, `S3_*` | Shared object storage required across API and worker hosts. |
+| `WORKER_INLINE`, `WORKER_EXTERNAL` | Decide whether this process runs media jobs or delegates to an external worker. |
+| `WORKER_CONCURRENCY`, `RENDER_CONCURRENCY` | Throughput vs. CPU. Rendering is the expensive stage. |
+| `MEDIA_MAX_UPLOAD_BYTES` | Maximum source size accepted by the API. |
+| `PROCESSOR_ENABLED`, `PROCESSOR_URL` | Optional Rust acceleration; not the worker queue or media store. |
 
 ## Scaling
 
-- **API tier:** `docker compose up -d --scale api=3`. Sessions are cookie-based
-  and the queue lives in Redis, so any replica can serve any request.
-- **Job throughput:** `docker compose up -d --scale worker=8`. Workers are
-  stateless and pull from the same queue.
+- **API tier:** scale HTTP replicas independently. Sessions are cookie-based,
+  metadata is in PostgreSQL, and Redis/object storage are shared.
+- **Job throughput:** scale Docker worker replicas independently; every worker
+  pulls the same Redis queue and materializes media from shared object storage.
 - **Rendering is CPU-bound.** Cap `RENDER_CONCURRENCY` per worker to the cores
-  you can spare, then add workers rather than raising it.
-- **More than one API replica:** set `API_WORKER_INLINE=false` so the HTTP tier
-  does not compete with encoding for CPU.
-- The Rust sidecar scales the same way; it holds no state.
+  available, then add worker replicas rather than overcommitting a single host.
+- The Rust sidecar is optional and stateless. A remote worker must have a
+  reachable processor endpoint or colocated binary for the Rust path; otherwise
+  its Python processing implementation is used.
 
 ## Object storage
 
@@ -111,97 +182,92 @@ its default. The ones that matter most in production:
 ```env
 STORAGE_BACKEND=s3
 S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
-S3_ACCESS_KEY=...
-S3_SECRET_KEY=...
-S3_BUCKET=clipforge-media
+S3_ACCESS_KEY=<access-key>
+S3_SECRET_KEY=<secret-key>
+S3_BUCKET=<bucket-name>
 S3_REGION=auto
 S3_PATH_STYLE=false
 ```
 
-Video binaries live only in object storage. The database stores keys, sizes and
-metadata — never file contents.
+Video binaries and temporary upload parts live in object storage. PostgreSQL
+stores object keys, sizes, checksums and metadata—not file contents. The worker
+cleans the upload-part prefix after it materializes the final source; configure
+an object lifecycle rule as a backstop for abandoned uploads.
 
 ## Database migrations
 
-`AUTO_CREATE_TABLES=true` creates tables on startup, which is convenient for a
-single box and is what compose does by default. For a real deployment:
+`AUTO_CREATE_TABLES=true` creates tables on startup, convenient for a single box
+and used by Compose by default. For a real deployment:
 
 1. Generate a baseline: `alembic revision --autogenerate -m "initial"` with
-   `DATABASE_URL` pointed at the target database (Alembic is already a
-   dependency).
+   `DATABASE_URL` pointed at the target database (`alembic` is retained for the
+   migration command).
 2. Set `AUTO_CREATE_TABLES=false`.
-3. Run `alembic upgrade head` as a deploy step before starting new containers.
+3. Run `alembic upgrade head` as a deployment step before starting new workers
+   and API functions.
 
-There is no `alembic/` directory in the tree yet — the migrations environment has
-not been initialised, so step 1 is a required first action. Until then keep
-`AUTO_CREATE_TABLES=true` and treat schema changes as requiring a maintenance
-window.
+There is no initialized `alembic/` directory in this repository yet, so a
+production migration pipeline still needs that baseline before disabling
+`AUTO_CREATE_TABLES`.
 
 ## Health and observability
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /healthz` | Liveness. Cheap; no dependencies touched. |
-| `GET /readyz` | Readiness: database, storage, queue, FFmpeg, and sidecar reachability. Returns 503 when FFmpeg is missing, because no media job could succeed. |
-| `GET /api/v1/system/status` | Capabilities, job counts, queue depth, worker stats, WebSocket connections. |
-| `GET /api/v1/system/metrics` | Counters for scraping. |
-| `GET /docs`, `/openapi.json` | Interactive API documentation and the raw schema. |
+| `GET /healthz` | Liveness; no dependencies touched. |
+| `GET /readyz` | API readiness: database, storage and queue. It reports local FFmpeg and worker mode but does not require media binaries in the Vercel API process. |
+| `GET /api/v1/system/status` | Capabilities, job counts, queue depth, worker mode and WebSocket connections. |
+| `GET /api/v1/system/metrics` | Prometheus-style counters. |
+| `GET /docs`, `/openapi.json` | Interactive API docs and raw schema. |
 
-Logs are structured (`LOG_JSON=true`), and every response carries an
-`X-Request-ID` that also appears on error bodies — worth capturing in support
-reports.
-
-The Rust sidecar exposes `/healthz` and `/readyz` of its own; both are wired to
-container healthchecks.
+A 200 `/readyz` means the API's configured dependencies are available; it does
+not prove a separate worker is running or that Vercel's bundle is under its
+limit. Monitor worker process health and queue age/depth separately. Logs are
+structured (`LOG_JSON=true`), and each HTTP response carries an `X-Request-ID`.
 
 ## Production checklist
 
-- [ ] `SECRET_KEY`, `JWT_SECRET`, `ENCRYPTION_KEY` are random and stored as
-      secrets, not in the image or the repo.
+- [ ] `SECRET_KEY`, `JWT_SECRET`, `ENCRYPTION_KEY` are random secrets, not in the
+      image or repository.
 - [ ] `ENVIRONMENT=production`, `DEBUG=false`, `LOG_JSON=true`.
-- [ ] `COOKIE_SECURE=true` and TLS terminated in front of `web`.
+- [ ] `COOKIE_SECURE=true`; TLS is terminated in front of the web app.
 - [ ] `CORS_ORIGINS` lists exactly the public origin(s).
-- [ ] PostgreSQL and Redis are managed services with backups; **Redis has
-      `appendonly yes`** because it holds the job queue.
-- [ ] Object storage has a lifecycle/retention policy for abandoned uploads.
-- [ ] `AUTO_CREATE_TABLES=false` once migrations are in place.
-- [ ] `RATE_LIMIT_ENABLED=true` and limits tuned to real traffic.
-- [ ] Provider keys set only if you want hosted AI; otherwise plan for local
-      weights (below).
-- [ ] A worker health alert: a queue that grows while workers are up means a
-      crash-looping handler.
-- [ ] Upload size limits match your storage budget and plan tiers.
+- [ ] PostgreSQL, Redis and object storage are reachable from both API and worker.
+- [ ] `QUEUE_BACKEND=redis`, `WORKER_INLINE=false`, and the Docker worker service
+      is running with the same database/Redis/storage environment.
+- [ ] `WORKER_EXTERNAL=true` on the Vercel API so capability reporting describes
+      the external worker rather than the lightweight function runtime.
+- [ ] Redis persistence/availability and a worker queue-age alert are configured.
+- [ ] Object storage has lifecycle/retention policy for abandoned upload parts.
+- [ ] `AUTO_CREATE_TABLES=false` only after migrations are initialized and run.
+- [ ] `RATE_LIMIT_ENABLED=true` and limits are tuned to real traffic.
+- [ ] Provider credentials and upload limits match the product's policy.
+- [ ] Vercel's actual function bundle size and production deployment are verified.
 
 ## Known deployment gaps
 
-Stated plainly, because a checklist that overstates readiness is worse than none:
-
-- **The Rust processor has never been compiled.** No Rust toolchain is available
-  in the development sandbox and the toolchain download hosts are blocked.
-  `docker compose build processor` is its first real compile; expect to fix
-  diagnostics there. Nothing else depends on it — leave
-  `PROCESSOR_ENABLED=false` for a first deployment.
-- **The Compose stack has not been started end to end** in that same sandbox (no
-  Docker). The configuration is statically verified instead: `apps/api/tests/test_deployment.py`
-  checks service definitions, that every compose env var is actually read by
-  `Settings`, that `COPY` sources exist in their build contexts, that the nginx
-  upstream matches the compose service name, and that the SPA fallback and
-  WebSocket upgrade headers are present.
-- **`minio-init`** relies on the `mc` image alias syntax; if your MinIO version
-  differs, create the bucket manually.
-- **No CI pipeline** is committed yet. The intended jobs are
-  `pytest`, `vitest`, `tsc`, `check:api`, and the Playwright suite.
+- **Vercel production bundle size has not been verified here.** The API
+  requirements have been split based on API imports and worker handlers, but the
+  actual Vercel build/deployment output is still the authority for the 500 MB
+  function cap.
+- **The Rust processor has not been compiled in this sandbox.** Build it with
+  `docker compose build processor` in an environment with Docker/Rust available
+  before enabling it in production.
+- **The Compose stack has not been run end-to-end in this sandbox.** The
+  configuration is covered by static deployment tests, but Docker images,
+  external worker connectivity, Redis/S3 behavior and production services need a
+  real deployment smoke test.
+- **The Alembic environment has not been initialized.** Do not disable table
+  creation until a baseline and migration process exist.
+- **The browser E2E suite requires a separately installed Playwright browser**
+  and has not been run in this change unless stated in the implementation report.
 
 ## Local ASR without a hosted provider
 
-`faster-whisper` needs model weights from Hugging Face. In a network-restricted
-environment, either:
-
-- pre-download weights and set `WHISPER_DOWNLOAD_ROOT` with
-  `WHISPER_LOCAL_FILES_ONLY=true`, or
-- paste a narration script and let DTW alignment produce real word timings
-  (this is what the demo asset uses), or
-- point `AI_TRANSCRIPTION_PROVIDER` at an OpenAI-compatible endpoint you host.
-
-The system reports which of these is in use — `GET /capabilities` never claims a
-provider is available when it is not.
+`faster-whisper` weights are optional and are not bundled in the default worker
+requirements. For local ASR, add/install the provider and model weights on the
+worker, then set `AI_TRANSCRIPTION_PROVIDER=faster-whisper` and configure
+`WHISPER_DOWNLOAD_ROOT` (or pre-cache the model with
+`WHISPER_LOCAL_FILES_ONLY=true`). Otherwise configure a hosted transcription
+provider or paste a script and use real DTW alignment. Capabilities report which
+provider the current deployment can use.

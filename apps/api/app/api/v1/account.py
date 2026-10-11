@@ -88,17 +88,29 @@ def capabilities(user: CurrentUser) -> CapabilityOut:
 
 def _capabilities() -> dict:
     caps = settings.capabilities()
-    queue = get_queue()
+    try:
+        queue_backend = get_queue().backend_name()
+    except Exception as exc:
+        log.warning("capabilities.queue_unavailable", error=str(exc)[:200])
+        queue_backend = "unavailable"
+    try:
+        storage_backend = get_storage().name
+    except Exception as exc:
+        log.warning("capabilities.storage_unavailable", error=str(exc)[:200])
+        storage_backend = "unavailable"
     return {
         "ffmpeg": caps["ffmpeg"],
         "ffprobe": caps["ffprobe"],
         "media_pipeline": caps["media_pipeline"],
-        "vision": caps["vision"],
+        "vision": {
+            **caps["vision"],
+            "face_detection": bool(caps["vision"].get("enabled")),
+        },
         "transcription": caps["transcription"],
         "llm": caps["llm"],
         "embeddings": caps["embeddings"],
-        "storage_backend": get_storage().name,
-        "queue_backend": queue.backend_name(),
+        "storage_backend": storage_backend,
+        "queue_backend": queue_backend,
         "billing": available_providers(),
         "processor": {
             "enabled": bool(settings.processor_enabled and settings.processor_url),
@@ -106,6 +118,13 @@ def _capabilities() -> dict:
             # internal reachability grant, not a user-facing endpoint.
             "transport": "internal_service" if settings.processor_url else "in_process",
         },
+        "worker_mode": (
+            "external"
+            if settings.worker_external
+            else "inline"
+            if settings.worker_inline and not settings.is_vercel
+            else "disabled"
+        ),
         "environment": settings.environment,
     }
 

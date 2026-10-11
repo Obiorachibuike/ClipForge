@@ -28,9 +28,11 @@ RUN apt-get update \
 
 WORKDIR /srv/app
 
-# Dependency layer first: requirements change far less often than source.
+# This shared API/worker container installs the full worker runtime. Vercel
+# builds its API from apps/api/requirements.txt and never installs this file.
 COPY apps/api/requirements.txt /srv/app/requirements.txt
-RUN pip install --no-cache-dir -r /srv/app/requirements.txt
+COPY apps/api/requirements-worker.txt /srv/app/requirements-worker.txt
+RUN pip install --no-cache-dir -r /srv/app/requirements-worker.txt
 
 COPY apps/api/app /srv/app/apps/api/app
 
@@ -40,7 +42,7 @@ COPY scripts /srv/app/scripts
 
 # Non-root runtime user; the media work directories are the only writable paths.
 RUN useradd --create-home --shell /bin/bash clipforge \
-    && mkdir -p /srv/app/.data/storage /srv/app/.data/work /srv/app/.data/uploads \
+    && mkdir -p /srv/app/.data/storage /srv/app/.data/work \
     && chown -R clipforge:clipforge /srv/app
 USER clipforge
 

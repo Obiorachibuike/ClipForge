@@ -56,13 +56,20 @@ async def lifespan(app: FastAPI):
     app.state.capabilities = capabilities
 
     stop_inline = None
-    if settings.worker_inline:
+    if settings.worker_inline and not settings.is_vercel:
         from app.workers.inline import start_inline_worker, stop_inline_worker
 
         start_inline_worker()
         stop_inline = stop_inline_worker
     else:
-        log.info("app.worker_inline_disabled", detail="Run workers separately: python -m app.workers.worker")
+        log.info(
+            "app.worker_inline_disabled",
+            detail=(
+                "Vercel functions never run media workers. Deploy the Docker worker separately."
+                if settings.is_vercel
+                else "Run workers separately: python -m app.workers.worker"
+            ),
+        )
 
     try:
         yield
@@ -272,7 +279,20 @@ def readyz() -> JSONResponse:
     from app.services.storage import get_storage
 
     try:
-        checks["storage"] = get_storage().name
+        storage = get_storage()
+        storage_ready = storage.name != "none"
+        storage_detail = ""
+        if hasattr(storage, "reachable"):
+            storage_ready, storage_detail = storage.reachable()
+        if settings.worker_external and storage.name != "s3":
+            storage_ready = False
+            storage_detail = "external workers require shared S3-compatible storage"
+        checks["storage"] = {
+            "backend": storage.name,
+            "reachable": bool(storage_ready),
+            "detail": storage_detail,
+        }
+        healthy = healthy and bool(storage_ready)
     except Exception as exc:
         healthy = False
         checks["storage"] = f"error: {type(exc).__name__}"
@@ -282,18 +302,20 @@ def readyz() -> JSONResponse:
         healthy = False
         checks["queue"] = f"error: {type(exc).__name__}"
 
-    from app.services.media.ffmpeg import ffmpeg_bin
-
-    try:
-        checks["ffmpeg"] = bool(ffmpeg_bin())
-        if not checks["ffmpeg"]:
-            healthy = False
-    except Exception:
-        checks["ffmpeg"] = False
-        healthy = False
+    # Vercel intentionally runs only the lightweight HTTP/API package. Media
+    # binaries belong to the separately deployed Docker worker, so their absence
+    # on this process must not make request validation or API routes unready.
+    checks["ffmpeg_local"] = bool(settings.ffmpeg_path)
+    checks["processing_worker"] = (
+        "external_configured"
+        if settings.worker_external
+        else "inline"
+        if settings.worker_inline and not settings.is_vercel
+        else "external_required"
+    )
 
     # The Rust processor is optional: report whether it is reachable, but never
-    # degrade readiness over it — the Python pipeline covers every command.
+    # degrade API readiness over it — the Python worker pipeline covers every command.
     from app.services.processor import sidecar
 
     try:
@@ -321,7 +343,10 @@ def system_status() -> dict:
         "capabilities": getattr(app.state, "capabilities", {}),
         "jobs": stats,
         "queue": {"backend": get_queue().backend_name(), "depth": get_queue().depth()},
-        "worker": inline_worker_stats() or {"mode": "external"},
+        "worker": inline_worker_stats() or {
+            "mode": "external" if settings.worker_external else "disabled",
+            "configured": settings.worker_external,
+        },
         "websockets": manager.stats(),
         "environment": settings.environment,
     }

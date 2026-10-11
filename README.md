@@ -35,6 +35,25 @@ Every stage is a real background job with persisted progress, retry,
 cancellation and failure recovery — nothing is processed inside an HTTP request,
 and progress streams to the browser over a WebSocket that reconnects and resyncs.
 
+### Runtime split
+
+The Vercel FastAPI function installs only `apps/api/requirements.txt`: web,
+validation, database, Redis, storage, security and provider-HTTP dependencies.
+It validates requests, stores upload chunks in the configured object store and
+queues jobs. Media/ingestion dependencies live in
+`apps/api/requirements-worker.txt`; the Docker-compatible worker image installs
+that full set and runs outside Vercel. `apps/api/requirements-dev.txt` adds test
+tools for local checks.
+
+For resumable uploads, the API stores each chunk as a separate object. On
+completion it queues a probe job with the upload ID; the worker assembles the
+source in its own workspace, writes it back through shared object storage, then
+runs the existing probe, transcription, discovery, framing and render pipeline.
+The API and worker share PostgreSQL, Redis and object storage—not local disk.
+Production must use Redis (no process-memory queue fallback) and set
+`WORKER_INLINE=false`; `WORKER_EXTERNAL=true` on the API reports the external
+worker's media capabilities.
+
 | Stage | What actually happens |
 | --- | --- |
 | **Upload** | Chunked and resumable, streamed to object storage. The whole video never enters browser memory or the database. |
@@ -64,11 +83,11 @@ absent — never simulated.**
 **Frontend** React 18 · TypeScript · Vite · Tailwind · Zustand · TanStack Query ·
 Framer Motion · Lucide · HTML5 video · WebSocket
 
-**Backend** FastAPI · Pydantic · SQLAlchemy · PostgreSQL · Redis · background
-workers · WebSockets
+**Backend** FastAPI · Pydantic · SQLAlchemy · PostgreSQL · Redis · external
+Docker-compatible media workers · WebSockets
 
-**Media and AI** FFmpeg · OpenCV · faster-whisper (word timings) ·
-sentence-transformers ·
+**Media and AI** FFmpeg · OpenCV · optional faster-whisper (word timings) ·
+optional sentence-transformers ·
 
 **Optional** Rust (Axum/Tokio/Serde/tracing) sidecar for probing, waveform
 scanning and parallel frame extraction. Independently scalable and never
@@ -81,7 +100,7 @@ hard-coded.
 ## Layout
 
 ```
-apps/api/           FastAPI application, workers, media + AI pipeline
+apps/api/           FastAPI app, worker pipeline, split API/worker/dev requirements
 apps/web/           React single-page app
 apps/processor/rust Optional Rust media-orchestration sidecar
 infrastructure/     Dockerfile for the API/worker image
@@ -110,15 +129,13 @@ cd apps/web && npx tsc --noEmit && npm run check:api
 `npm run check:api` fails the build when the hand-written frontend types drift
 from the live OpenAPI schema.
 
-## Status
+## Verification status
 
-Working and verified: upload, probing, transcription (with script alignment
-where ASR weights are unavailable), clip discovery, framing, captions, editing,
-rendering and export — exercised end to end on a generated 143-second demo asset.
-
-Not yet done, and not claimed anywhere in the product: the Playwright
-end-to-end suite has been written but never executed (no browser binary in the
-build environment), the Rust sidecar has never been compiled (no toolchain), and
-Docker Compose has not been started in that environment. See the "Known
-deployment gaps" section of [docs/deployment.md](docs/deployment.md) for the full
-list and the static checks that stand in for a live run.
+The repository contains the real upload, probing, transcription, discovery,
+framing, caption, rendering and export implementations. The API/worker dependency
+and storage boundary described above is subject to the checks run for the
+current change; it does not imply that a Vercel deployment or its 500 MB bundle
+limit has been verified. The Playwright suite, Rust container build and full
+Compose integration require their respective external tools/services. See the
+"Known deployment gaps" section of [docs/deployment.md](docs/deployment.md) and
+the implementation report for current check results.

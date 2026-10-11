@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.errors import AppError, CancelledError_, NotFoundError, user_message
 from app.core.logging import get_logger
-from app.models import Job, JobStatus, utcnow
+from app.models import Job, JobStatus, as_utc, utcnow
 from app.services import events as ev
 from app.services.queue import get_queue
 from app.services.runtime import registry
@@ -341,6 +341,25 @@ class JobService:
             "active": len(queue.active_jobs()),
             "queue_backend": queue.backend_name(),
         }
+
+    @staticmethod
+    def recover_unqueued(db: Session) -> int:
+        """Re-enqueue durable queued rows missing from Redis after an outage.
+
+        Job rows commit before their IDs are pushed to Redis. If Redis fails in
+        that small window, startup reconciliation prevents a committed job from
+        remaining queued forever; Redis sorted-set insertion is idempotent.
+        """
+        queue = get_queue()
+        stmt = select(Job).where(Job.status.in_([JobStatus.QUEUED.value, JobStatus.RETRYING.value]))
+        enqueued = 0
+        for job in db.execute(stmt).scalars():
+            if queue.is_queued(job.id) or queue.is_active(job.id):
+                continue
+            delay = max(0.0, (as_utc(job.run_after) - _now()).total_seconds()) if job.run_after else 0.0
+            queue.enqueue(job.id, priority=job.priority, delay_seconds=delay)
+            enqueued += 1
+        return enqueued
 
     @staticmethod
     def recover_stale(db: Session, older_than_minutes: int | None = None) -> int:

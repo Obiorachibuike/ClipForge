@@ -86,15 +86,29 @@ def job_channel(job_id: str) -> str:
 
 
 class _Subscriber:
-    __slots__ = ("channels", "queue", "loop")
+    __slots__ = ("channels", "queue", "loop", "_seen", "_seen_order", "_seen_lock")
 
     def __init__(self, channels: set[str], loop: asyncio.AbstractEventLoop, maxsize: int = 500) -> None:
         self.channels = channels
         self.queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=maxsize)
         self.loop = loop
+        self._seen: set[str] = set()
+        self._seen_order: deque[str] = deque()
+        self._seen_lock = threading.Lock()
 
     def matches(self, event: Event) -> bool:
         return event.channel in self.channels
+
+    def should_deliver(self, event: Event) -> bool:
+        """A multi-channel event is delivered once per socket, not once/channel."""
+        with self._seen_lock:
+            if event.event_id in self._seen:
+                return False
+            self._seen.add(event.event_id)
+            self._seen_order.append(event.event_id)
+            while len(self._seen_order) > 1_000:
+                self._seen.discard(self._seen_order.popleft())
+        return True
 
     def deliver(self, event: Event) -> None:
         """Thread-safe delivery into the subscriber's asyncio queue."""
@@ -122,19 +136,40 @@ class EventBus:
         self._redis_stop = threading.Event()
         self._redis_pubsub = None
         self._recent: deque[Event] = deque(maxlen=200)
+        self._seen_event_channels: set[tuple[str, str]] = set()
+        self._seen_event_order: deque[tuple[str, str]] = deque()
 
     # ------------------------------------------------------------ publish ---
     def publish(self, event: Event) -> None:
+        self._dispatch(event, relay_to_redis=True)
+
+    def _dispatch(self, event: Event, *, relay_to_redis: bool) -> None:
+        if not self._remember_once(event):
+            return
         self._recent.append(event)
-        for sub in list(self._subscribers):
-            if sub.matches(event):
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for sub in subscribers:
+            if sub.matches(event) and sub.should_deliver(event):
                 sub.deliver(event)
-        client = get_redis()
-        if client is not None:
-            try:
-                client.publish(event.channel, event.to_json())
-            except Exception as exc:  # pragma: no cover - redis hiccup
-                log.warning("events.publish_failed", error=str(exc))
+        if relay_to_redis:
+            client = get_redis()
+            if client is not None:
+                try:
+                    client.publish(f"{REDIS_CHANNEL_PREFIX}{event.channel}", event.to_json())
+                except Exception as exc:  # pragma: no cover - redis hiccup
+                    log.warning("events.publish_failed", error=str(exc))
+
+    def _remember_once(self, event: Event) -> bool:
+        key = (event.event_id, event.channel)
+        with self._lock:
+            if key in self._seen_event_channels:
+                return False
+            self._seen_event_channels.add(key)
+            self._seen_event_order.append(key)
+            while len(self._seen_event_order) > 2_000:
+                self._seen_event_channels.discard(self._seen_event_order.popleft())
+        return True
 
     def emit(
         self,
@@ -164,8 +199,7 @@ class EventBus:
             project_id=project_id,
             job_id=job_id,
         )
-        self._recent.append(event)
-        for channel in targets:
+        for channel in sorted(targets):
             delivered = Event(
                 type=event.type,
                 channel=channel,
@@ -200,8 +234,11 @@ class EventBus:
     def _ensure_redis_bridge(self) -> None:
         if self._redis_thread is not None and self._redis_thread.is_alive():
             return
-        if get_redis() is None:
+        if settings.queue_backend == "memory" and settings.cache_backend == "memory":
             return
+        # Start even when Redis is temporarily down; the bridge retries in its
+        # own thread and existing WebSocket subscribers can recover without a
+        # disconnect/reconnect cycle.
         self._redis_stop.clear()
         self._redis_thread = threading.Thread(target=self._redis_loop, name="eventbus-redis", daemon=True)
         self._redis_thread.start()
@@ -216,7 +253,8 @@ class EventBus:
             try:
                 client = get_redis()
                 if client is None:
-                    return
+                    time.sleep(2.0)
+                    continue
                 pubsub = client.pubsub(ignore_subscribe_messages=True)
                 self._redis_pubsub = pubsub
                 pubsub.psubscribe(f"{REDIS_CHANNEL_PREFIX}*")
@@ -229,9 +267,11 @@ class EventBus:
                         event = Event.from_json(message["data"])
                     except Exception:
                         continue
-                    for sub in list(self._subscribers):
-                        if sub.matches(event):
-                            sub.deliver(event)
+                    # Redis channels are namespaced; ignore unrelated messages
+                    # even when a broad subscription is used by an adapter.
+                    if not event.channel:
+                        continue
+                    self._dispatch(event, relay_to_redis=False)
             except redis_lib.RedisError as exc:
                 log.warning("events.redis_bridge_error", error=str(exc))
                 time.sleep(2.0)

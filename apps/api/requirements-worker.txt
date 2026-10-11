@@ -1,0 +1,19 @@
+# Full dependency set for the long-running Docker-compatible processing worker.
+# Install alongside the API runtime because both processes use the same app code.
+-r requirements.txt
+
+# ---------------------------------------------------------- URL ingestion ---
+yt-dlp==2026.8.19                   # public video URL imports (worker handler only)
+
+# -------------------------------------------------------- media processing ---
+av==18.1.0                          # PyAV fallback probing
+numpy==2.4.6                        # PCM analysis, alignment and framing
+pillow==12.3.0                      # thumbnails and generated image assets
+opencv-python-headless==4.14.0.94   # Haar face detection + saliency
+imageio-ffmpeg==0.6.0               # local fallback when system FFmpeg is absent
+
+# ------------------------------------------------------- script alignment ---
+# Bundles the espeak-ng library/data used by real forced alignment of a supplied
+# narration script. The aligner itself remains a worker-side implementation.
+espeakng-loader==0.2.4
+espeakng==1.0.5

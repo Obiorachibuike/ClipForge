@@ -1,20 +1,100 @@
-"""Video ingestion jobs: metadata probing and poster frames."""
+"""Video ingestion jobs: assemble storage-backed uploads, probe media and make a poster."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import MediaError, NotFoundError
 from app.core.logging import get_logger
-from app.models import Job, Project, ProjectStatus, Video, VideoStatus
+from app.models import Job, Project, ProjectStatus, UploadSession, Video, VideoStatus
 from app.services.job_service import JobService
 from app.services.media import ffmpeg
 from app.services.pipeline.workspace import workspace_for
 from app.services.processor import sidecar
-from app.services.storage import get_storage
+from app.services.storage import get_storage, safe_filename
+from app.services.upload_service import upload_part_key
 
 log = get_logger(__name__)
+CHECKSUM_SAMPLE_BYTES = 256 * 1024 * 1024
+
+
+def assemble_upload_parts(storage, session: UploadSession, destination: Path, progress_cb=None) -> str:
+    """Assemble ordered object-storage chunks on the worker's local workspace.
+
+    This deliberately runs in the worker, not the API function. The API only
+    validates/stores individual chunks; the worker owns any full-size local file.
+    The checksum matches the existing sampled SHA-256 policy (first 256 MiB).
+    """
+    if session.total_chunks < 1 or session.size_bytes < 1:
+        raise MediaError("The upload has no stored media chunks.", code="upload_data_missing")
+    received = dict(session.received_chunks or {})
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    hash_remaining = min(CHECKSUM_SAMPLE_BYTES, int(session.size_bytes))
+    total_written = 0
+
+    with destination.open("wb") as output:
+        for index in range(session.total_chunks):
+            expected_size = min(session.chunk_size, session.size_bytes - index * session.chunk_size)
+            if expected_size <= 0 or str(index) not in received:
+                raise MediaError("An uploaded chunk is missing.", code="upload_data_missing")
+            if int(received[str(index)]) != expected_size:
+                raise MediaError("An uploaded chunk has an invalid size.", code="upload_size_mismatch")
+
+            key = upload_part_key(session, index)
+            try:
+                part = storage.stat(key)
+            except Exception as exc:
+                raise MediaError("An uploaded chunk is missing from object storage.", code="upload_data_missing") from exc
+            if part.size != expected_size:
+                raise MediaError("An uploaded chunk is incomplete in object storage.", code="upload_size_mismatch")
+
+            part_written = 0
+            for data in storage.open_stream(key):
+                part_written += len(data)
+                total_written += len(data)
+                if part_written > expected_size or total_written > session.size_bytes:
+                    raise MediaError("Uploaded data exceeds its declared size.", code="upload_size_mismatch")
+                output.write(data)
+                if hash_remaining:
+                    sample = data[:hash_remaining]
+                    digest.update(sample)
+                    hash_remaining -= len(sample)
+            if part_written != expected_size:
+                raise MediaError("An uploaded chunk ended before its declared size.", code="upload_data_missing")
+            if progress_cb:
+                progress_cb((index + 1) / session.total_chunks * 100.0)
+
+    if total_written != session.size_bytes:
+        destination.unlink(missing_ok=True)
+        raise MediaError("The assembled upload size does not match its declaration.", code="upload_size_mismatch")
+    return digest.hexdigest()
+
+
+def _sampled_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    remaining = min(CHECKSUM_SAMPLE_BYTES, path.stat().st_size)
+    with Path(path).open("rb") as handle:
+        while remaining:
+            chunk = handle.read(min(4 * 1024 * 1024, remaining))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
+
+
+def _upload_session(db: Session, upload_id: str, video_id: str) -> UploadSession | None:
+    return db.execute(
+        select(UploadSession).where(
+            UploadSession.upload_id == upload_id,
+            UploadSession.video_id == video_id,
+        )
+    ).scalars().one_or_none()
 
 
 def run_probe(db: Session, job: Job) -> dict:
@@ -26,11 +106,47 @@ def run_probe(db: Session, job: Job) -> dict:
 
     video.status = VideoStatus.PROBING.value
     db.commit()
-    JobService.report_progress(db, job, stage="probe", progress=5, message="Reading video metadata", force=True)
+    JobService.report_progress(db, job, stage="prepare", progress=2, message="Preparing source media", force=True)
 
     storage = get_storage()
+    session = _upload_session(db, str(job.payload.get("upload_id") or ""), video.id) if job.payload.get("upload_id") else None
     with workspace_for(job.id) as workdir:
-        local = storage.materialize(video.storage_key, workdir)
+        if storage.exists(video.storage_key):
+            # This also makes a retry safe if a worker crashed after the object
+            # upload but before it committed the checksum/status to PostgreSQL.
+            local = storage.materialize(video.storage_key, workdir)
+            if not video.checksum:
+                video.checksum = _sampled_sha256(local)
+                video.size_bytes = local.stat().st_size
+                db.commit()
+            if session is not None:
+                _delete_upload_parts(storage, session)
+        elif session is not None:
+            JobService.report_progress(
+                db, job, stage="assemble", progress=2, message="Assembling uploaded chunks", force=True
+            )
+            local = workdir / safe_filename(session.filename, fallback="source.media")
+
+            def assembly_progress(pct: float) -> None:
+                JobService.report_progress(
+                    db,
+                    job,
+                    stage="assemble",
+                    progress=2 + max(0.0, min(100.0, pct)) * 0.025,
+                    message="Assembling uploaded chunks",
+                )
+
+            checksum = assemble_upload_parts(storage, session, local, progress_cb=assembly_progress)
+            storage.put_file(video.storage_key, local, session.content_type or video.content_type or "video/mp4")
+            video.size_bytes = local.stat().st_size
+            video.checksum = checksum
+            db.commit()
+            _delete_upload_parts(storage, session)
+        else:
+            # Legacy/imported videos already have a complete storage object.
+            local = storage.materialize(video.storage_key, workdir)
+
+        JobService.report_progress(db, job, stage="probe", progress=5, message="Reading video metadata", force=True)
         JobService.check_cancelled(db, job)
 
         # Prefer the Rust sidecar when it is configured and reachable; it returns
@@ -82,3 +198,10 @@ def run_probe(db: Session, job: Job) -> dict:
         "fps": video.fps,
         "has_audio": video.has_audio,
     }
+
+
+def _delete_upload_parts(storage, session: UploadSession) -> None:
+    try:
+        storage.delete_prefix(session.parts_prefix)
+    except Exception as exc:  # pragma: no cover - storage lifecycle cleans leftovers
+        log.warning("upload.parts_cleanup_failed", upload_id=session.upload_id, error=str(exc)[:200])
