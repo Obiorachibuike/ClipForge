@@ -155,8 +155,9 @@ class Worker:
         db = get_session_factory()()
         try:
             recovered = JobService.recover_stale(db)
-            if recovered:
-                log.info("worker.recovered_jobs", count=recovered)
+            queued = JobService.recover_unqueued(db)
+            if recovered or queued:
+                log.info("worker.recovered_jobs", stale=recovered, unqueued=queued)
         except Exception as exc:  # pragma: no cover
             log.warning("worker.recovery_failed", error=str(exc))
         finally:

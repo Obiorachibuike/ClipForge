@@ -18,22 +18,22 @@ the pieces fit, and — where it matters — why they were built this way.
                        │                    └──────┬───────┘
                        │                           │
                        │                    ┌──────▼───────┐
-                       │                    │   worker     │  same image, no HTTP
+                       │                    │   worker     │  Docker, outside Vercel
                        │                    └──┬────────┬──┘
                        │                       │        │
               ┌────────▼────────┐   ┌──────────▼──┐  ┌──▼─────────────┐
               │ minio / S3 / R2 │   │  processor  │  │ ffmpeg + opencv│
-              │  video objects  │   │   (Rust)    │  │  in worker     │
+              │ source + parts  │   │   (Rust)    │  │  in worker     │
               └─────────────────┘   └─────────────┘  └────────────────┘
 ```
 
 | Component | Responsibility |
 | --- | --- |
 | `web` | React SPA. Serves static assets, proxies `/api`, `/ws`, `/healthz` to the API so the browser only ever talks to one origin. |
-| `api` | FastAPI. Auth, uploads, CRUD, job creation, WebSocket fan-out. **Never** processes media inline. |
-| `worker` | Runs jobs from the queue. Same image as the API, different command, so they cannot drift. |
+| `api` | FastAPI. Auth, uploads, CRUD, job creation, WebSocket fan-out. Vercel installs only the API requirements; media execution stays out of functions. |
+| `worker` | Runs jobs from Redis in a Docker-compatible process outside Vercel. The same worker image can be used with Compose; it reads/writes media only through the shared object-storage backend. |
 | `postgres` | All metadata: users, projects, videos, transcripts, candidates, clips, captions, jobs, renders, exports, usage. No video binaries. |
-| `redis` | Job queue, pub/sub for WebSocket fan-out, rate-limit counters, upload sessions. |
+| `redis` | Durable job queue, event pub/sub for WebSocket fan-out, and shared cache/rate-limit counters. Upload-session metadata remains in PostgreSQL. |
 | `minio` | S3-compatible object storage for the video/audio/JPEG objects. Swappable for R2 or real S3. |
 | `processor` | **Optional** Rust sidecar. Fast probing, waveform scans, parallel frame extraction. |
 
@@ -123,10 +123,12 @@ Renders record their exact `spec` so a render is reproducible.
 ## Storage
 
 `StorageBackend` (`base.py`, `local.py`, `s3.py`) is provider-independent: local
-filesystem for development, S3/R2/MinIO for deployments. Videos are uploaded
-chunked and resumable (`UploadService`), spooled to storage without ever
-buffering a whole file in memory or in the database. Streaming playback uses
-range requests against signed storage URLs.
+filesystem for development, S3/R2/MinIO for deployments. Resumable upload chunks
+are stored as separate objects; the API never requires a shared local filesystem
+with the worker. `/complete` validates the part objects and queues the upload ID.
+The Docker worker assembles them in its own workspace, writes the completed source
+through `StorageBackend`, then continues probing and processing. Streaming
+playback uses range requests against signed storage URLs.
 
 `storage_backend=auto` picks S3 only when an endpoint and credentials are
 configured **and** a bucket probe succeeds; otherwise it stays local. That probe

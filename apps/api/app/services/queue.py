@@ -52,6 +52,7 @@ class JobQueue(Protocol):
     def active_jobs(self) -> dict[str, str]: ...
     def depth(self) -> int: ...
     def is_active(self, job_id: str) -> bool: ...
+    def is_queued(self, job_id: str) -> bool: ...
     def touch(self, job_id: str, worker_id: str) -> None: ...
     def active_since(self) -> dict[str, float]: ...
     def backend_name(self) -> str: ...
@@ -66,13 +67,17 @@ class InMemoryJobQueue:
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._heap: list[tuple[float, str]] = []
+        self._queued: set[str] = set()
         self._active: dict[str, tuple[str, float]] = {}
         self._cancelled: set[str] = set()
 
     def enqueue(self, job_id: str, *, priority: int = 100, delay_seconds: float = 0.0) -> None:
         score = time.time() + max(0.0, delay_seconds) + min(priority, 999) / 1000.0
         with self._cond:
+            if job_id in self._queued:
+                return
             heapq.heappush(self._heap, (score, job_id))
+            self._queued.add(job_id)
             self._cond.notify_all()
 
     def claim(self, worker_id: str, timeout: float = 1.0) -> str | None:
@@ -84,6 +89,7 @@ class InMemoryJobQueue:
                     score, job_id = self._heap[0]
                     if score <= now:
                         heapq.heappop(self._heap)
+                        self._queued.discard(job_id)
                         self._active[job_id] = (worker_id, now)
                         return job_id
                     wait = min(max(score - now, 0.02), 0.25)
@@ -126,6 +132,10 @@ class InMemoryJobQueue:
     def is_active(self, job_id: str) -> bool:
         with self._lock:
             return job_id in self._active
+
+    def is_queued(self, job_id: str) -> bool:
+        with self._lock:
+            return job_id in self._queued
 
     def touch(self, job_id: str, worker_id: str) -> None:
         with self._lock:
@@ -205,6 +215,9 @@ class RedisJobQueue:
     def is_active(self, job_id: str) -> bool:
         return self._client().hexists(ACTIVE_KEY, job_id) == 1
 
+    def is_queued(self, job_id: str) -> bool:
+        return self._client().zscore(READY_KEY, job_id) is not None
+
     def touch(self, job_id: str, worker_id: str) -> None:
         self._client().hset(ACTIVE_KEY, job_id, worker_id)
 
@@ -224,7 +237,9 @@ def get_queue() -> JobQueue:
     if _queue is None:
         with _queue_lock:
             if _queue is None:
-                use_redis = settings.queue_backend == "redis" or (
+                if settings.is_production and settings.queue_backend == "memory":
+                    raise QueueUnavailable("The in-memory queue is not supported in production")
+                use_redis = settings.queue_backend == "redis" or settings.is_production or (
                     settings.queue_backend == "auto" and get_redis() is not None
                 )
                 if use_redis:
@@ -234,6 +249,11 @@ def get_queue() -> JobQueue:
                         _queue = candidate
                         log.info("queue.redis")
                     except Exception as exc:
+                        if settings.queue_backend == "redis" or settings.is_production:
+                            # Production and explicit Redis deployments must not
+                            # acknowledge jobs into process-local memory.
+                            log.error("queue.redis_required_unavailable", error=str(exc))
+                            raise QueueUnavailable("Redis is required for the configured job queue") from exc
                         log.warning("queue.redis_unavailable", error=str(exc), fallback="memory")
                         _queue = InMemoryJobQueue()
                 else:

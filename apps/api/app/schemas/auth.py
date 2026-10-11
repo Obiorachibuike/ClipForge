@@ -129,4 +129,5 @@ class CapabilityOut(BaseModel):
     queue_backend: str
     billing: list[dict]
     processor: dict
+    worker_mode: str = "disabled"
     environment: str

@@ -1,8 +1,8 @@
 """Run a worker inside the API process.
 
-Enabled with WORKER_INLINE=true (the default in development and for single-box
-deployments). Production deployments set WORKER_INLINE=false and scale `worker`
-containers independently - the code path is identical.
+Enable explicitly with WORKER_INLINE=true for local/single-box development.
+The application default is false so serverless API processes never start a
+background media worker; production deploys a separate Docker worker instead.
 """
 from __future__ import annotations
 

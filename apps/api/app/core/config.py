@@ -59,12 +59,13 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True  # production should run Alembic instead
 
     redis_url: str = "redis://localhost:6379/0"
-    # auto -> use redis when reachable, otherwise fall back to in-process
+    # auto may use memory in development; production and explicit redis mode are fail-closed.
     queue_backend: Literal["auto", "redis", "memory"] = "auto"
     cache_backend: Literal["auto", "redis", "memory"] = "auto"
 
     # -------------------------------------------------------------- workers ---
-    worker_inline: bool = True  # run a worker inside the API process (dev)
+    worker_inline: bool = False  # enable explicitly for development/single-process installs
+    worker_external: bool = False  # set on the API when a Docker-compatible worker is deployed
     worker_concurrency: int = 2
     worker_poll_interval: float = 0.5
     worker_max_attempts: int = 3
@@ -97,7 +98,9 @@ class Settings(BaseSettings):
     media_probe_timeout_seconds: int = 120
     media_frame_sample_fps: float = 2.0
     media_max_analysis_frames: int = 900
-    upload_chunk_size: int = 8 * 1024 * 1024
+    # Keep each request under Vercel's function request-body limit; clients use
+    # the negotiated value, so this remains resumable on all deployments.
+    upload_chunk_size: int = 4 * 1024 * 1024
     upload_session_ttl_minutes: int = 60 * 24
     default_aspect_ratio: str = "9:16"
 
@@ -189,6 +192,11 @@ class Settings(BaseSettings):
         return self.environment == "production"
 
     @property
+    def is_vercel(self) -> bool:
+        """Vercel functions must never host the long-running media worker."""
+        return os.getenv("VERCEL", "").strip().lower() in {"1", "true", "yes"}
+
+    @property
     def allowed_extensions(self) -> set[str]:
         return {e.strip().lower().lstrip(".") for e in self.media_allowed_extensions.split(",") if e.strip()}
 
@@ -229,12 +237,28 @@ class Settings(BaseSettings):
         """Truthful description of what this deployment can actually execute."""
         from app.services.ai import capabilities as ai_caps  # local import: heavy
 
+        worker_media = self.worker_external or (self.worker_inline and not self.is_vercel)
+        vision = ai_caps.vision_capability(self)
+        if worker_media and self.vision_enabled:
+            # The Docker worker image installs OpenCV-headless and FFmpeg even
+            # when the lightweight API runtime intentionally does not.
+            haar = next((item for item in vision["detectors"] if item["name"] == "haar"), None)
+            if haar is not None:
+                haar["available"] = True
+                haar["note"] = "OpenCV Haar cascade is available in the configured processing worker"
+            vision["enabled"] = True
+        providers = ai_caps.available_providers(self)
+        if worker_media and self.ai_script_alignment:
+            providers["transcription"]["script_alignment"]["available"] = True
+            providers["transcription"]["script_alignment"]["detail"] = (
+                "Script alignment is available in the configured processing worker."
+            )
         return {
-            "ffmpeg": bool(self.ffmpeg_path),
-            "ffprobe": self.has_ffprobe,
-            "media_pipeline": bool(self.ffmpeg_path),
-            "vision": ai_caps.vision_capability(self),
-            **ai_caps.available_providers(self),
+            "ffmpeg": bool(self.ffmpeg_path) or worker_media,
+            "ffprobe": self.has_ffprobe or worker_media,
+            "media_pipeline": bool(self.ffmpeg_path) or worker_media,
+            "vision": vision,
+            **providers,
         }
 
 

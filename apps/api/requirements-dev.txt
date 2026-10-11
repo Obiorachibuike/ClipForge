@@ -1,0 +1,8 @@
+# Development and backend test dependencies. Includes the worker stack so the
+# complete media pipeline can be exercised locally.
+-r requirements-worker.txt
+
+# -------------------------------------------------------------------- tests ---
+pytest==9.1.1
+pytest-asyncio==1.4.0
+PyYAML==6.0.2                       # docker-compose/deployment static checks

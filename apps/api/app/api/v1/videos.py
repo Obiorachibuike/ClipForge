@@ -294,7 +294,20 @@ async def upload_small_file(
         project_id=project.id,
     )
     # Reading the SpooledTemporaryFile is blocking I/O, so it runs off the loop.
-    await asyncio.to_thread(UploadService.stage_stream, db, user, session.upload_id, file.file)
+    # This convenience route is capped to one negotiated chunk; larger files use
+    # the resumable endpoint so Vercel never buffers a large multipart request.
+    try:
+        await asyncio.to_thread(
+            UploadService.stage_stream,
+            db,
+            user,
+            session.upload_id,
+            file.file,
+            max_bytes=settings.upload_chunk_size,
+        )
+    except Exception:
+        UploadService.abort(db, user, session.upload_id)
+        raise
     video, session, job = UploadService.complete_upload(db, user, session.upload_id)
     return UploadCompleteResponse(
         video=VideoOut.model_validate(video),

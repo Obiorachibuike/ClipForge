@@ -140,16 +140,14 @@ services:
         condition: service_healthy
     environment:
       <<: *api-env
-      # Each API process runs its own inline worker pool. Scaling the API tier
-      # then also scales job throughput; set WORKER_INLINE=false to split them.
-      WORKER_INLINE: ${API_WORKER_INLINE:-true}
+      # The HTTP API uses Redis + object storage and does not process media.
+      # Opt into inline processing only for a local single-container setup.
+      WORKER_INLINE: ${API_WORKER_INLINE:-false}
+      WORKER_EXTERNAL: ${API_WORKER_EXTERNAL:-true}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "${API_PORT:-8000}:8000"
-    volumes:
-      # Shared scratch space for materialized media (spool files, job workspaces).
-      - media-work:/srv/app/.data
     networks: [clipforge]
 
   worker:
@@ -188,6 +186,9 @@ services:
       LOG_JSON: ${LOG_JSON:-true}
     expose:
       - "8100"
+    volumes:
+      # The optional local Rust sidecar receives worker workspace paths.
+      - media-work:/srv/app/.data
     networks: [clipforge]
 
   # ------------------------------------------------------------------ frontend ---
@@ -208,7 +209,8 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
-  # Shared between api and worker: both must see the same materialized files.
+  # Worker-local scratch; shared only with the optional local Rust sidecar.
+  # API-to-worker media transfer always uses S3-compatible object storage.
   media-work:
 
 networks:

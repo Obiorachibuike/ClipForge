@@ -1,4 +1,4 @@
-"""Application bootstrap: directories, system caption presets, safety checks."""
+"""Application bootstrap without worker-only media requirements."""
 from __future__ import annotations
 
 from app.core.config import settings
@@ -13,9 +13,22 @@ log = get_logger(__name__)
 
 
 def prepare_directories() -> None:
-    for path in (settings.local_storage_root, WORK_ROOT, STAGING_ROOT):
+    """Create only scratch directories required by this process role.
+
+    The Vercel API uses its writable temporary directory for small multipart
+    uploads. It does not create local media storage or worker workspaces; those
+    belong to the configured object store and the external Docker worker.
+    """
+    paths = [STAGING_ROOT]
+    if settings.worker_inline and not settings.is_vercel:
+        paths.append(WORK_ROOT)
+    for path in paths:
         path.mkdir(parents=True, exist_ok=True)
-    log.info("bootstrap.directories", storage=str(settings.local_storage_root), work=str(WORK_ROOT))
+    log.info(
+        "bootstrap.directories",
+        staging=str(STAGING_ROOT),
+        worker_inline=settings.worker_inline and not settings.is_vercel,
+    )
 
 
 def seed_system_data() -> None:
@@ -30,31 +43,53 @@ def seed_system_data() -> None:
 
 
 def verify_environment() -> dict:
-    """Log (and return) what this deployment can actually do."""
-    from app.services.ai.registry import available_providers, vision_capability
-    from app.services.media.ffmpeg import ffmpeg_bin, ffprobe_bin
+    """Log available API dependencies without requiring local media binaries."""
     from app.services.queue import get_queue
 
-    capabilities = {
-        "ffmpeg": ffmpeg_bin(),
-        "ffprobe": ffprobe_bin() or "(not found - using PyAV probing)",
-        "storage": get_storage().name,
-        "queue": get_queue().backend_name(),
-        "vision": vision_capability().get("active"),
-        "providers": available_providers(),
+    capabilities = settings.capabilities()
+    try:
+        storage_name = get_storage().name
+    except Exception as exc:
+        storage_name = f"unavailable ({type(exc).__name__})"
+        log.warning("bootstrap.storage_unavailable", error=str(exc)[:200])
+    try:
+        queue_name = get_queue().backend_name()
+    except Exception as exc:
+        queue_name = f"unavailable ({type(exc).__name__})"
+        log.warning("bootstrap.queue_unavailable", error=str(exc)[:200])
+
+    result = {
+        "ffmpeg": capabilities["ffmpeg"],
+        "ffprobe": capabilities["ffprobe"],
+        "media_pipeline": capabilities["media_pipeline"],
+        "storage": storage_name,
+        "queue": queue_name,
+        "vision": capabilities["vision"].get("active"),
+        "providers": {
+            key: capabilities[key]
+            for key in ("transcription", "llm", "embeddings")
+        },
+        "worker_mode": (
+            "external"
+            if settings.worker_external
+            else "inline"
+            if settings.worker_inline and not settings.is_vercel
+            else "disabled"
+        ),
     }
-    if not capabilities["ffmpeg"]:
-        log.error(
-            "bootstrap.ffmpeg_missing",
-            detail="Media processing is disabled until FFmpeg is available. Set MEDIA_FFMPEG_PATH.",
+    if not result["media_pipeline"]:
+        log.warning(
+            "bootstrap.local_media_unavailable",
+            detail="This API process has no FFmpeg; configure an external Docker worker or install worker dependencies.",
         )
     log.info(
         "bootstrap.environment",
-        storage=capabilities["storage"],
-        queue=capabilities["queue"],
+        storage=storage_name,
+        queue=queue_name,
+        worker_mode=result["worker_mode"],
         environment=settings.environment,
     )
-    return capabilities
+    return result
 
 
 def bootstrap(seed: bool = True) -> dict:

@@ -4,17 +4,24 @@
 
 - Python 3.11 or 3.12
 - Node 20+
-- FFmpeg — optional, but media features need it. `imageio-ffmpeg` ships a static
-  build, so the common paths work without a system install.
-- PostgreSQL and Redis — optional for local work. The API falls back to SQLite
-  and an in-process queue automatically, and says so in the startup log.
+- FFmpeg — optional for API-only work; processing handlers use it. The worker
+  requirements include `imageio-ffmpeg` as a fallback when no system binary is
+  installed.
+- PostgreSQL and Redis — optional for local work. Development can use SQLite
+  and an in-process queue; production requires shared PostgreSQL, Redis and
+  object storage.
+
+`apps/api/requirements.txt` is the lightweight HTTP/API runtime used by Vercel.
+The Docker image installs `apps/api/requirements-worker.txt` (which includes the
+API set plus media/ingestion tools); local development and tests should install
+`apps/api/requirements-dev.txt`.
 
 ## First run
 
 ```bash
 # 1. Python environment
 python3 -m venv .venv
-./.venv/bin/python -m pip install -r apps/api/requirements.txt
+./.venv/bin/python -m pip install -r apps/api/requirements-dev.txt
 
 # 2. Environment
 cp .env.example .env
@@ -58,10 +65,10 @@ python scripts/seed.py --user --asset demo/creator_masterclass.mp4 \
 ## Tests
 
 ```bash
-# Backend — 95 tests
+# Backend — 117 tests
 ./.venv/bin/python -m pytest apps/api/tests -q
 
-# Frontend — 99 tests
+# Frontend — 105 tests
 cd apps/web && npm test
 
 # Types and API drift
@@ -137,7 +144,7 @@ scripts/               demo asset, seeding, API type check
 | --- | --- |
 | `Media processing is disabled` | FFmpeg not found. Install it, set `MEDIA_FFMPEG_PATH`, or install `imageio-ffmpeg`. |
 | Jobs stay `queued` | No worker running. Set `WORKER_INLINE=true` or start `python -m app.workers.worker`. |
-| `redis.unavailable` in the log | Expected without Redis: the queue and cache fall back to in-process. Fine for one process, not for multiple workers. |
+| `queue.redis_required_unavailable` in production | Configure reachable Redis. In-process queues are for development/tests only and are never used as the production job queue. |
 | Uploads fail at `init` | Check the extension/MIME allowlists and `MEDIA_MAX_UPLOAD_BYTES`. |
 | Truncated/no transcript | No ASR weights and no configured API provider. Paste a script so alignment can produce real timings, or configure a provider. |
 | `403 csrf_failed` on a write | The `X-CSRF-Token` header is missing or stale. Refresh the page; the client re-reads the cookie. |

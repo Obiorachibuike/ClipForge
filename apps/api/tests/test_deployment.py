@@ -55,6 +55,42 @@ def test_vercel_services_route_public_traffic_and_bind_the_internal_processor():
     assert all(service != "processor" for _, service in targets)
 
 
+def test_api_runtime_requirements_exclude_worker_only_media_packages():
+    api_requirements = (REPO_ROOT / "apps/api/requirements.txt").read_text().lower()
+    worker_requirements = (REPO_ROOT / "apps/api/requirements-worker.txt").read_text().lower()
+    dev_requirements = (REPO_ROOT / "apps/api/requirements-dev.txt").read_text().lower()
+
+    # These dependencies are imported only by processing handlers or their
+    # optional media fallbacks; Vercel's API requirements must not pull them in.
+    worker_only = (
+        "yt-dlp==",
+        "av==",
+        "numpy==",
+        "pillow==",
+        "opencv-python-headless==",
+        "imageio-ffmpeg==",
+        "espeakng-loader==",
+        "espeakng==",
+    )
+    for package in worker_only:
+        assert package not in api_requirements, f"{package} leaked into the Vercel API bundle"
+        assert package in worker_requirements, f"{package} is missing from the worker image"
+
+    assert "-r requirements.txt" in worker_requirements
+    assert "-r requirements-worker.txt" in dev_requirements
+    for package in ("fastapi==", "sqlalchemy==", "redis==", "boto3==", "cryptography==", "httpx=="):
+        assert package in api_requirements, f"API runtime dependency {package} is missing"
+
+    dockerfile = (REPO_ROOT / "infrastructure/Dockerfile.api").read_text()
+    assert "requirements-worker.txt" in dockerfile
+    assert _vercel()["services"]["api"]["root"] == "apps/api"
+
+
+def test_api_runtime_defaults_do_not_start_media_workers_inline():
+    assert Settings.model_fields["worker_inline"].default is False
+    assert Settings.model_fields["worker_external"].default is False
+
+
 def test_compose_defines_the_full_stack():
     services = _compose()["services"]
     for required in ("web", "api", "worker", "postgres", "redis", "minio", "processor"):
@@ -110,13 +146,21 @@ def test_dockerfiles_and_their_build_contexts_exist():
         assert dockerfile.is_file(), f"{name}: dockerfile {dockerfile} does not exist"
 
 
-def test_api_and_worker_mount_a_shared_media_volume():
-    """Materialized media must be visible to whichever worker picks up the job."""
+def test_api_transfers_media_through_object_storage_not_a_shared_local_volume():
+    """Vercel/API and Docker workers may run on different hosts and disks."""
     services = _compose()["services"]
-    api_volumes = services["api"]["volumes"]
-    worker_volumes = services["worker"]["volumes"]
-    assert api_volumes == worker_volumes
-    assert any("media-work" in mount for mount in api_volumes)
+    api = services["api"]
+    worker = services["worker"]
+    processor = services["processor"]
+
+    assert not any("media-work" in mount for mount in api.get("volumes", []))
+    assert any("media-work" in mount for mount in worker["volumes"])
+    # The optional Rust processor may share the worker's local scratch path in
+    # Compose; that scratch volume is not the API-to-worker transfer mechanism.
+    assert worker["volumes"] == processor["volumes"]
+    assert api["environment"]["STORAGE_BACKEND"] == "s3"
+    assert worker["environment"]["STORAGE_BACKEND"] == "s3"
+    assert api["environment"]["S3_BUCKET"] == worker["environment"]["S3_BUCKET"]
 
 
 def test_nginx_proxies_to_the_compose_api_service():

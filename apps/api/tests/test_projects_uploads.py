@@ -124,6 +124,11 @@ def test_chunked_upload_lifecycle(auth_api):
         )
         assert chunk.status_code in (200, 201, 204), chunk.text
         received += 1
+    from app.services.storage import get_storage
+
+    storage = get_storage()
+    part_key = f"projects/{project_id}/videos/{session['video_id']}/parts/00000000.part"
+    assert storage.stat(part_key).size == CHUNK_SIZE
     status = auth_api.get(f"/api/v1/uploads/{upload_id}").json()
     assert len(status["received_chunks"]) == received
     assert status["progress"] > 0
@@ -133,9 +138,19 @@ def test_chunked_upload_lifecycle(auth_api):
         body = complete.json()
         assert body["video"]["id"]
         assert body["job"]["type"]
-        # Never processed inline: the request returns a queued job, not a result.
+        assert body["job"]["payload"]["upload_id"] == upload_id
+        # The API returns a queued job but does not build the complete source
+        # object; the Docker worker assembles the parts before probing.
         assert body["job"]["status"] in {"queued", "running"}
         assert body["video"]["status"] in {"uploaded", "uploading", "processing", "ready"}
+        assert not storage.exists(body["video"]["storage_key"])
+
+        retried = auth_api.post(f"/api/v1/uploads/{upload_id}/complete")
+        assert retried.status_code == 200
+        assert retried.json()["job"]["id"] == body["job"]["id"]
+        records = auth_api.get("/api/v1/usage/history").json()["records"]
+        assert sum(record["metric"] == "videos_uploaded" for record in records) == 1
+        assert sum(record["metric"] == "storage_bytes" for record in records) == 1
     else:
         # Rejecting non-media on completion is also correct behaviour.
         assert complete.status_code in (415, 422)
