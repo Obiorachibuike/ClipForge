@@ -3,20 +3,24 @@
 # Multi-stage: compile with the full toolchain, ship a slim runtime that only
 # needs FFmpeg. The binary is a pure orchestrator — it shells out to FFmpeg and
 # FFprobe rather than linking libav, keeping the image small.
-FROM rust:1.82-slim AS build
+# Pinned to a toolchain new enough to satisfy transitive deps (e.g. hyper-util)
+# that require the `edition2024` Cargo feature, stabilized in Rust 1.85.
+FROM rust:1.90-slim-bookworm AS build
 
 WORKDIR /src
 
-# Cache the dependency build: copy manifests, compile a stub, then the sources.
-COPY Cargo.toml ./
+# Cache the dependency build: copy manifests (incl. the lockfile so the build
+# is reproducible and matches what's checked into the repo), compile a stub,
+# then the sources.
+COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src \
     && echo 'fn main() { println!("stub"); }' > src/main.rs \
-    && cargo build --release \
+    && cargo build --release --locked \
     && rm -rf src
 
 COPY src ./src
 # `touch` forces a rebuild of the real sources after the stub replaced them.
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release --locked
 
 
 FROM debian:bookworm-slim AS runtime
