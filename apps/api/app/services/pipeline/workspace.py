@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from app.core.config import REPO_ROOT, settings
+from app.core.config import settings
 from app.core.logging import get_logger
 
 log = get_logger(__name__)

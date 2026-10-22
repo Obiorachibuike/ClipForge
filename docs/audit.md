@@ -251,7 +251,7 @@ Redis was unavailable.
 | Vercel deployment | Config + static tests | Yes | n/a | **No** |
 | Docker image / Compose | Yes | Static tests | n/a | **No** |
 | Rust processor | Source present | Sidecar tests | No build | No |
-| Frontend workflow | Yes | 105 tests + build | No browser E2E | No |
+| Frontend workflow | Yes | 110 tests + build | No browser E2E | No |
 
 ---
 

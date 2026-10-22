@@ -10,21 +10,21 @@ import asyncio
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, File, Header, Query, Request, Response, UploadFile, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy import select
-
 from app.api.deps import (
     CurrentUser,
     DbSession,
     PageParams,
     owned_project,
     owned_video,
-    rate_limit,
     upload_rate_limit,
 )
 from app.core.config import settings
-from app.core.errors import ConflictError, NotFoundError, PayloadTooLargeError, ValidationError
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    PayloadTooLargeError,
+    ValidationError,
+)
 from app.core.logging import get_logger
 from app.models import (
     JobType,
@@ -33,7 +33,6 @@ from app.models import (
     Transcript,
     TranscriptStatus,
     UploadSession,
-    UploadStatus,
     Video,
     VideoStatus,
 )
@@ -47,13 +46,27 @@ from app.schemas.media import (
     UploadInitRequest,
     UploadInitResponse,
     UploadStatusResponse,
-    VideoUpdate,
     VideoOut,
+    VideoUpdate,
 )
 from app.services.job_service import JobService
-from app.services.storage import RangeSpec, get_storage, safe_filename, validate_key
+from app.services.storage import RangeSpec, get_storage, validate_key
 from app.services.upload_service import UploadService
 from app.services.usage_service import UsageService
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Header,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 
 log = get_logger(__name__)
 router = APIRouter(tags=["Videos"])
@@ -263,7 +276,7 @@ def upload_status(upload_id: str, db: DbSession, user: CurrentUser) -> UploadSta
 
 @router.post("/uploads/{upload_id}/complete", response_model=UploadCompleteResponse)
 def complete_upload(upload_id: str, db: DbSession, user: CurrentUser) -> UploadCompleteResponse:
-    video, session, job = UploadService.complete_upload(db, user, upload_id)
+    video, _session, job = UploadService.complete_upload(db, user, upload_id)
     return UploadCompleteResponse(
         video=VideoOut.model_validate(video),
         job=JobOut.model_validate(job),

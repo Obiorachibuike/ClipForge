@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderUnavailableError
 from app.core.logging import get_logger
-from app.services.ai.types import ProviderInfo, SegmentTiming, TranscriptionResult, WordTiming
+from app.services.ai.types import (
+    ProviderInfo,
+    SegmentTiming,
+    TranscriptionResult,
+    WordTiming,
+)
 
 log = get_logger(__name__)
 

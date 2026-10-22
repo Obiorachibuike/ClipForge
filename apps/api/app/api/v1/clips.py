@@ -6,11 +6,14 @@ the source of truth.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
-from sqlalchemy import func, select
-
-from app.api.deps import CurrentUser, DbSession, PageParams, owned_clip, owned_project, owned_video
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    PageParams,
+    owned_clip,
+    owned_project,
+)
+from app.core.errors import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models import (
     CandidateStatus,
@@ -18,10 +21,8 @@ from app.models import (
     ClipCandidate,
     ClipStatus,
     Project,
-    RenderStatus,
     User,
     Video,
-    utcnow,
 )
 from app.schemas.clips import (
     CandidateBulkUpdate,
@@ -46,12 +47,14 @@ from app.schemas.clips import (
     RenderOut,
 )
 from app.schemas.common import OkResponse, Page
-from app.schemas.media import JobOut, VideoOut
+from app.schemas.media import VideoOut
 from app.services.caption_service import CaptionService
 from app.services.clip_service import ClipService
 from app.services.headline_service import HeadlineService
 from app.services.media.ass import CAPTION_PRESETS
 from app.services.pipeline.analyzer import DEFAULT_WEIGHTS
+from fastapi import APIRouter, Query, status
+from sqlalchemy import func, select
 
 log = get_logger(__name__)
 router = APIRouter(tags=["Clips"])

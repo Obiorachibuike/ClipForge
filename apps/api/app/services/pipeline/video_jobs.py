@@ -4,11 +4,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.core.errors import MediaError, NotFoundError, user_message
 from app.core.config import settings
+from app.core.errors import MediaError, NotFoundError, user_message
 from app.core.logging import get_logger
 from app.models import Job, Project, ProjectStatus, UploadSession, Video, VideoStatus
 from app.services.job_service import JobService
@@ -17,6 +14,8 @@ from app.services.pipeline.workspace import workspace_for
 from app.services.processor import sidecar
 from app.services.storage import get_storage, safe_filename
 from app.services.upload_service import upload_part_key
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 CHECKSUM_SAMPLE_BYTES = 256 * 1024 * 1024
@@ -177,12 +176,13 @@ def _probe_media(db: Session, job: Job, video: Video) -> dict:
         probe = sidecar.probe_media(local) or ffmpeg.probe_media(local)
         if probe["duration"] <= 0:
             raise MediaError("This file reports no duration and cannot be processed.", code="invalid_media")
-        max_duration = int(settings.media_max_duration_seconds or 0)
-        if max_duration and float(probe["duration"]) > max_duration:
-            hours = max_duration / 3600
+        # `duration_within_limit` treats a zero limit as "unlimited" and refuses
+        # non-finite values; `run_probe` records the failure on the video row.
+        if not settings.duration_within_limit(probe["duration"]):
+            limit = int(settings.media_max_duration_seconds)
             raise MediaError(
                 f"That video is {float(probe['duration']) / 3600:.1f} hours long; this deployment accepts "
-                f"at most {hours:.1f} hours per source.",
+                f"at most {limit / 3600:.1f} hours per source.",
                 code="video_too_long",
             )
 

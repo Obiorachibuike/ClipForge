@@ -8,11 +8,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from app.core.errors import JobError
 from app.core.logging import get_logger
 from app.models import Job, JobType
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

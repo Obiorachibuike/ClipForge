@@ -186,8 +186,8 @@ class PaystackProvider:
     def create_checkout(self, *, user_id: str, email: str, plan: str, success_url: str, cancel_url: str) -> CheckoutSession:
         if not self.available():
             raise BillingNotConfigured("paystack", "Set PAYSTACK_SECRET_KEY.")
-        from app.services.billing.plans import plan_for
         from app.services.ai.http import request_json
+        from app.services.billing.plans import plan_for
 
         definition = plan_for(plan)
         response = request_json(
@@ -245,8 +245,8 @@ class FlutterwaveProvider:
     def create_checkout(self, *, user_id: str, email: str, plan: str, success_url: str, cancel_url: str) -> CheckoutSession:
         if not self.available():
             raise BillingNotConfigured("flutterwave", "Set FLUTTERWAVE_SECRET_KEY.")
-        from app.services.billing.plans import plan_for
         from app.services.ai.http import request_json
+        from app.services.billing.plans import plan_for
 
         definition = plan_for(plan)
         response = request_json(

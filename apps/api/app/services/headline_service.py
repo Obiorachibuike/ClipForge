@@ -11,14 +11,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.logging import get_logger
+from app.models import (
+    Clip,
+    ClipCandidate,
+    Transcript,
+    TranscriptStatus,
+    TranscriptWord,
+    User,
+)
+from app.services.ai import registry as ai_registry
+from app.services.ai.types import WordTiming
+from app.services.pipeline.analyzer import build_corpus_idf, build_sentences
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from app.core.logging import get_logger
-from app.models import Clip, ClipCandidate, Transcript, TranscriptStatus, TranscriptWord, User
-from app.services.ai import registry as ai_registry
-from app.services.pipeline.analyzer import build_corpus_idf, build_sentences
-from app.services.ai.types import WordTiming
 
 log = get_logger(__name__)
 
@@ -96,7 +102,7 @@ class HeadlineService:
 
     @staticmethod
     def _tidy(text: str) -> str:
-        cleaned = re.sub(r"^(and|but|so|well|okay|ok|yeah|um|uh|you know|i mean)[,\s]+", "", text.strip(), flags=re.I)
+        cleaned = re.sub(r"^(and|but|so|well|okay|ok|yeah|um|uh|you know|i mean)[,\s]+", "", text.strip(), flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,\"'")
         if not cleaned:
             return ""

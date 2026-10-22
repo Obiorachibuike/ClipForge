@@ -12,9 +12,6 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.errors import ProviderUnavailableError
 from app.core.logging import get_logger
@@ -22,6 +19,8 @@ from app.core.security import decrypt_secret
 from app.models import AIProviderConfig, AIProviderKind, AIProviderName
 from app.services.ai.embeddings.tfidf import TfidfEmbeddings
 from app.services.ai.types import ProviderInfo
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -75,7 +74,10 @@ def transcription_provider(
 
     preference = (settings.ai_transcription_provider or "auto").lower()
     if preference in ("faster-whisper", "local", "whisper", "auto"):
-        from app.services.ai.transcription.faster_whisper import FasterWhisperProvider, availability
+        from app.services.ai.transcription.faster_whisper import (
+            FasterWhisperProvider,
+            availability,
+        )
 
         ok, detail = availability()
         if ok or preference != "auto":
@@ -83,7 +85,9 @@ def transcription_provider(
         log.info("ai.local_whisper_unavailable", detail=detail)
 
     if preference in ("openai", "custom", "openai-compatible", "auto"):
-        from app.services.ai.transcription.openai_compatible import OpenAICompatibleTranscriptionProvider
+        from app.services.ai.transcription.openai_compatible import (
+            OpenAICompatibleTranscriptionProvider,
+        )
 
         provider = OpenAICompatibleTranscriptionProvider(
             base_url=settings.custom_base_url if preference == "custom" else None,
@@ -109,7 +113,9 @@ def _build_transcription_from_config(config: AIProviderConfig):
     provider = config.provider.lower()
     api_key = decrypt_secret(config.api_key_encrypted)
     if provider in (AIProviderName.OPENAI.value, AIProviderName.OPENAI_COMPATIBLE.value, AIProviderName.CUSTOM.value):
-        from app.services.ai.transcription.openai_compatible import OpenAICompatibleTranscriptionProvider
+        from app.services.ai.transcription.openai_compatible import (
+            OpenAICompatibleTranscriptionProvider,
+        )
 
         return OpenAICompatibleTranscriptionProvider(
             api_key=api_key,
@@ -252,8 +258,12 @@ def _user_config(db: Session | None, user_id: str | None, kind: str) -> AIProvid
 # ------------------------------------------------------------- capability ---
 def available_providers(settings_obj=settings) -> dict[str, Any]:
     """Everything the settings screen needs, with honest availability."""
-    from app.services.ai.transcription.faster_whisper import availability as whisper_availability
-    from app.services.ai.transcription.faster_whisper import package_available as whisper_installed
+    from app.services.ai.transcription.faster_whisper import (
+        availability as whisper_availability,
+    )
+    from app.services.ai.transcription.faster_whisper import (
+        package_available as whisper_installed,
+    )
 
     whisper_ok, whisper_detail = whisper_availability()
 
@@ -271,7 +281,10 @@ def available_providers(settings_obj=settings) -> dict[str, Any]:
     llm_entries: list[dict[str, Any]] = []
     from app.services.ai.llm.anthropic import AnthropicProvider
     from app.services.ai.llm.gemini import GeminiProvider
-    from app.services.ai.llm.openai_compatible import OllamaProvider, OpenAICompatibleProvider
+    from app.services.ai.llm.openai_compatible import (
+        OllamaProvider,
+        OpenAICompatibleProvider,
+    )
 
     llm_entries.append(llm_entry(OpenAICompatibleProvider()))
     llm_entries.append(llm_entry(GeminiProvider()))
@@ -288,7 +301,9 @@ def available_providers(settings_obj=settings) -> dict[str, Any]:
     )
     llm_entries.append(llm_entry(OllamaProvider()))
 
-    from app.services.ai.embeddings.sentence_transformers import package_available as st_installed
+    from app.services.ai.embeddings.sentence_transformers import (
+        package_available as st_installed,
+    )
 
     return {
         "transcription": {

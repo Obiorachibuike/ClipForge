@@ -27,13 +27,19 @@ from __future__ import annotations
 
 import ctypes
 import threading
+import wave
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from app.core.errors import ProviderError, ProviderUnavailableError
 from app.core.logging import get_logger
-from app.services.ai.types import ProviderInfo, SegmentTiming, TranscriptionResult, WordTiming
+from app.services.ai.types import (
+    ProviderInfo,
+    SegmentTiming,
+    TranscriptionResult,
+    WordTiming,
+)
 from app.services.media.audio_features import HOP_SECONDS, extract_features
 
 log = get_logger(__name__)
@@ -48,7 +54,7 @@ _available: bool | None = None
 
 
 # --------------------------------------------------------------- espeak glue ---
-def espeak_library():  # noqa: ANN201
+def espeak_library():
     """Load espeak-ng through the PyPI wheel that bundles it."""
     global _lib, _available
     with _lock:
@@ -110,7 +116,7 @@ def synthesize_raw(text: str, *, voice: str = DEFAULT_VOICE, rate: int = DEFAULT
     buffer: list = []
     callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_int16), ctypes.c_int, ctypes.c_void_p)
 
-    def _collect(wav, count, _events):  # noqa: ANN001
+    def _collect(wav, count, _events):
         if count:
             buffer.append(np.ctypeslib.as_array(wav, shape=(int(count),)).copy())
         return 0
@@ -130,7 +136,7 @@ def synthesize_raw(text: str, *, voice: str = DEFAULT_VOICE, rate: int = DEFAULT
     return samples.tolist(), ESPEAK_SAMPLE_RATE
 
 
-def to_pcm16(samples) -> "object":  # noqa: ANN001
+def to_pcm16(samples) -> object:
     """Convert synthesised float samples (-1..1) into int16 PCM.
 
     espeak-ng returns float64: casting that straight to int16 truncates every
@@ -146,8 +152,9 @@ def to_pcm16(samples) -> "object":  # noqa: ANN001
 
 def write_pcm16_wav(samples, sample_rate: int, target: Path) -> Path:
     """Write int16 mono PCM to a WAV, tolerating mixed input dtypes."""
-    import numpy as np
     import wave
+
+    import numpy as np
 
     array = to_pcm16(samples)
     if array.size == 0:
@@ -189,10 +196,9 @@ class AlignmentResult:
     diagnostics: dict | None = None
 
 
-def _features_from_samples(samples, sample_rate: int, *, start: float = 0.0, duration: float | None = None):  # noqa: ANN001
+def _features_from_samples(samples, sample_rate: int, *, start: float = 0.0, duration: float | None = None):
     """Feature extraction for in-memory audio (mirrors the file-based path)."""
     import numpy as np
-
     from app.services.media.audio_features import (
         FRAME_SECONDS,
         HOP_SECONDS,
@@ -229,7 +235,7 @@ def _features_from_samples(samples, sample_rate: int, *, start: float = 0.0, dur
     return np.concatenate([mfcc, delta * 0.5, rms * 4.0], axis=1)
 
 
-def _dtw_path(reference, target, band: int = 60):  # noqa: ANN001
+def _dtw_path(reference, target, band: int = 60):
     """Constrained DTW. Returns (cost, path) with path as (ref_index, tgt_index)."""
     import numpy as np
 
@@ -273,7 +279,7 @@ def _dtw_path(reference, target, band: int = 60):  # noqa: ANN001
     return float(cost[n, m]), path
 
 
-def math_sqrt_dim(vector) -> float:  # noqa: ANN001
+def math_sqrt_dim(vector) -> float:
     import numpy as np
 
     return float(np.sqrt(vector.shape[0]))
@@ -396,7 +402,7 @@ def _nearest_target(mapping: dict[int, int], ref_index: int, path_indices: list[
     return path_indices[0] if path_indices else 0
 
 
-def _file_feature_matrix(features) -> "object":  # noqa: ANN001
+def _file_feature_matrix(features) -> object:
     import numpy as np
 
     mfcc = np.array(features.mfcc, dtype="float32")

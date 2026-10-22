@@ -522,7 +522,6 @@ def generate_candidates(
         return []
     raw: list[Candidate] = []
     count = len(sentences)
-    existing_vectors: list[list[float]] = []
     seen_windows: set[tuple[int, int]] = set()
 
     for start_index in range(count):

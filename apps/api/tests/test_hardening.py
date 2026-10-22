@@ -361,10 +361,8 @@ def test_service_rejects_non_finite_timestamps(db):
 
 # ------------------------------------------------- 6. caption timing honesty ---
 def test_captions_use_segment_timing_when_no_word_timings_exist(db):
-    from app.models import Clip, ClipStatus, TranscriptSegment, utcnow
+    from app.models import Clip, ClipStatus, TranscriptSegment, User, utcnow
     from app.services.caption_service import CaptionService
-
-    from app.models import User
 
     user = User(
         email=f"captions-{time.time_ns()}@example.com",
@@ -436,7 +434,14 @@ def test_captions_use_segment_timing_when_no_word_timings_exist(db):
 
 # ------------------------------------------------------------ 7. export 404 ---
 def test_export_download_reports_a_missing_file(auth_api, db):
-    from app.models import Clip, ClipStatus, Export, RenderJob, RenderStatus, Video, utcnow
+    from app.models import (
+        Clip,
+        ClipStatus,
+        Export,
+        RenderJob,
+        RenderStatus,
+        utcnow,
+    )
 
     user_id = auth_api.user["id"]
     project = _project(db, user_id, "Exports")

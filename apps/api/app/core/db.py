@@ -9,11 +9,10 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from app.core.config import settings
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-
-from app.core.config import settings
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
@@ -32,7 +31,7 @@ def _build_engine(url: str | None = None) -> Engine:
     if target.startswith("sqlite"):
 
         @event.listens_for(engine, "connect")
-        def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
+        def _sqlite_pragmas(dbapi_conn, _record):
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")

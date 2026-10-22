@@ -16,6 +16,7 @@ from pathlib import Path
 
 from app.core.errors import StorageError, ValidationError
 
+
 def validate_key(key: str) -> str:
     """Reject traversal and absolute paths in storage keys."""
     if not key or len(key) > 1024:

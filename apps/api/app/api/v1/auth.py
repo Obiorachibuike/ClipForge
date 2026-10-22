@@ -8,9 +8,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Request, Response, status
-from sqlalchemy import select
-
 from app.api.deps import CurrentUser, DbSession, auth_rate_limit, client_identity
 from app.core.config import settings
 from app.core.errors import AuthError, ConflictError, ValidationError
@@ -23,7 +20,8 @@ from app.core.security import (
     token_fingerprint,
     verify_password,
 )
-from app.models import PasswordResetToken, Session as SessionModel, User, as_utc, utcnow
+from app.models import PasswordResetToken, User, as_utc, utcnow
+from app.models import Session as SessionModel
 from app.schemas.auth import (
     Credentials,
     PasswordChange,
@@ -35,6 +33,8 @@ from app.schemas.auth import (
 )
 from app.schemas.common import MessageResponse, OkResponse
 from app.services.billing.subscription_service import SubscriptionService
+from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy import select
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])

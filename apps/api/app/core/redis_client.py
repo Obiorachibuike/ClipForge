@@ -23,7 +23,7 @@ _last_probe = 0.0
 _PROBE_RETRY_SECONDS = 5.0
 
 
-def _build_client():  # noqa: ANN202
+def _build_client():
     import redis
 
     return redis.Redis.from_url(

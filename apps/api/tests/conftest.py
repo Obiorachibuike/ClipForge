@@ -12,10 +12,15 @@ import secrets
 import shutil
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from fastapi.testclient import TestClient
+
 
 def _find_repo_root() -> Path:
     """Walk up until the `apps/api` layout is found (robust to pytest rootdir)."""
@@ -70,7 +75,7 @@ def app_module():
 @pytest.fixture(scope="session", autouse=True)
 def _prepare_database(app_module):
     """Create the schema once for the whole session."""
-    from app.core.db import dispose_engine, get_engine, init_engine_if_needed
+    from app.core.db import dispose_engine, init_engine_if_needed
 
     init_engine_if_needed()
     yield
@@ -91,7 +96,7 @@ def db():
 
 
 @pytest.fixture()
-def client(app_module) -> Iterator["TestClient"]:
+def client(app_module) -> Iterator[TestClient]:
     """Unauthenticated HTTP client with the app lifespan running."""
     from fastapi.testclient import TestClient
 

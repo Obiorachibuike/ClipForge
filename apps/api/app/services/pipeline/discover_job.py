@@ -1,12 +1,8 @@
 """Clip discovery job: transcript -> scored, explainable clip candidates."""
 from __future__ import annotations
 
-from pathlib import Path
+import math
 
-from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
 from app.core.errors import MediaError, NotFoundError
 from app.core.logging import get_logger
 from app.models import (
@@ -38,11 +34,15 @@ from app.services.pipeline.analyzer import (
 from app.services.pipeline.workspace import workspace_for
 from app.services.storage import get_storage
 from app.services.usage_service import UsageService
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
 MAX_LLM_MOMENTS = 14
 DEFAULT_MAX_CANDIDATES = 12
+DEFAULT_MIN_DURATION = 10.0
+DEFAULT_MAX_DURATION = 95.0
 # Hard ceilings applied inside the job as well as at the HTTP boundary: a job
 # payload is durable state, so it must be safe even if it was written by an older
 # or buggy caller.
@@ -72,9 +72,7 @@ def run(db: Session, job: Job) -> dict:
             "Transcribe the video before running clip discovery.", code="transcript_required"
         )
 
-    max_candidates = max(1, min(int(job.payload.get("max_candidates") or DEFAULT_MAX_CANDIDATES), MAX_CANDIDATES_LIMIT))
-    min_duration = max(DURATION_FLOOR, min(float(job.payload.get("min_duration") or 10.0), DURATION_CEILING))
-    max_duration = max(min_duration, min(float(job.payload.get("max_duration") or 95.0), DURATION_CEILING))
+    max_candidates, min_duration, max_duration = discovery_options(job.payload or {})
 
     JobService.report_progress(db, job, stage="load", progress=4, message="Loading transcript", force=True)
 
@@ -109,7 +107,8 @@ def run(db: Session, job: Job) -> dict:
     )
     if not candidates:
         raise MediaError(
-            "No clip candidates met the minimum quality threshold. Try a longer video or transcribe again.",
+            "No clip candidates could be formed from this transcript. Try a longer video, "
+            "a different minimum/maximum clip length, or transcribe again.",
             code="no_candidates",
         )
 
@@ -200,6 +199,13 @@ def run(db: Session, job: Job) -> dict:
 
     return {
         "candidates": len(saved),
+        "requested": max_candidates,
+        "message": (
+            f"Found {len(saved)} of {max_candidates} requested moments; "
+            "only the strongest non-overlapping moments are returned."
+            if len(saved) < max_candidates
+            else f"Found {len(saved)} moments."
+        ),
         "analyzer": provider_name if provider_name == "structural" else f"structural-v1+{provider_name}",
         "top_score": saved[0].score if saved else 0,
         "llm_used": provider_name != "structural",
@@ -207,6 +213,40 @@ def run(db: Session, job: Job) -> dict:
 
 
 # ------------------------------------------------------------------ helpers ---
+def _bounded_number(value, default: float, *, low: float, high: float) -> float:
+    """Parse a payload number, falling back to `default` and clamping to bounds.
+
+    A payload is durable state, so it may contain anything an older or buggy
+    caller wrote. Non-numeric and non-finite values (`nan`, `inf`) fall back to
+    the documented default instead of escaping the ceiling.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    return min(high, max(low, parsed))
+
+
+def discovery_options(payload: dict) -> tuple[int, float, float]:
+    """Return (max_candidates, min_duration, max_duration), always in bounds."""
+    max_candidates = int(
+        _bounded_number(payload.get("max_candidates"), DEFAULT_MAX_CANDIDATES, low=1, high=MAX_CANDIDATES_LIMIT)
+    )
+    min_duration = _bounded_number(
+        payload.get("min_duration"), DEFAULT_MIN_DURATION, low=DURATION_FLOOR, high=DURATION_CEILING
+    )
+    max_duration = _bounded_number(
+        payload.get("max_duration"), DEFAULT_MAX_DURATION, low=DURATION_FLOOR, high=DURATION_CEILING
+    )
+    if max_duration < min_duration:
+        max_duration = min_duration
+    return max_candidates, min_duration, max_duration
+
+
 def _primary_video(db: Session, project_id: str) -> Video | None:
     stmt = select(Video).where(Video.project_id == project_id).order_by(Video.created_at.desc())
     return db.execute(stmt).scalars().first()

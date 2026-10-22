@@ -161,6 +161,10 @@ object store:
 | `WORKER_INLINE`, `WORKER_EXTERNAL` | Decide whether this process runs media jobs or delegates to an external worker. |
 | `WORKER_CONCURRENCY`, `RENDER_CONCURRENCY` | Throughput vs. CPU. Rendering is the expensive stage. |
 | `MEDIA_MAX_UPLOAD_BYTES` | Maximum source size accepted by the API. |
+| `MEDIA_MAX_DURATION_SECONDS` | Source-duration ceiling (default 4 h; `0` disables). Long media is rejected at probe, and URL imports are skipped before download. |
+| `UPLOAD_SESSION_TTL_MINUTES` | How long an unfinished resumable upload can still receive chunks; expired sessions return 409 `upload_expired`. |
+| `WORKER_RECONCILE_SECONDS` | Startup and periodic stale-job reconciliation interval (default 60 s; `0` disables the periodic pass). |
+| `CORS_ORIGIN_REGEX` | Optional exact-pattern allowlist for preview/ephemeral origins. Never use a suffix match. |
 | `PROCESSOR_ENABLED`, `PROCESSOR_URL` | Optional Rust acceleration; not the worker queue or media store. |
 
 ## Scaling
@@ -238,6 +242,16 @@ no pending operations. Recovery: take a PostgreSQL snapshot before stamping;
 `AUTO_CREATE_TABLES=true` remains the development/Compose default. Production
 logs a warning when it is still enabled, and the production secret check below
 runs at every API and worker start.
+
+Migrations are run from `apps/api` (that is where `alembic.ini` lives). The URL
+is read from `DATABASE_URL`; credentials never belong in `alembic.ini`. SQLite
+uses batch mode so future `ALTER`s work in development.
+
+`alembic revision --autogenerate -m "..."` output still needs review:
+autogenerate can emit `Text()` without the `sa.` prefix for JSONB variants and
+can order `CREATE TABLE` statements incorrectly for some constraints. The
+baseline was corrected by hand and is checked against the models by
+`apps/api/tests/test_migrations.py`.
 
 ## Health and observability
 

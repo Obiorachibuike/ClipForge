@@ -128,7 +128,7 @@ def test_crop_expression_only_uses_keyframes_inside_the_clip():
         {"time": t, "width": 608, "height": 1080, "center_x": 600 + (t * 7) % 800, "center_y": 540}
         for t in range(0, 1200, 2)
     ]
-    width, height, x_expr, y_expr = crop_expression(
+    width, height, x_expr, _y_expr = crop_expression(
         keyframes, clip_start=300, clip_end=340, source_width=1920, source_height=1080
     )
     assert (width, height) == (608, 1080)

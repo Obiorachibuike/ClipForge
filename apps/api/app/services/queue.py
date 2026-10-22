@@ -41,6 +41,20 @@ class QueueUnavailable(RuntimeError):
     pass
 
 
+def _active_entry(value: str) -> tuple[str, float]:
+    """Parse an ACTIVE_KEY value written as `worker_id|heartbeat_epoch`.
+
+    Legacy entries contain only the worker id; they report no heartbeat so stale
+    recovery treats them as recoverable instead of trusting them forever.
+    """
+    worker, _, stamp = str(value).partition("|")
+    try:
+        heartbeat = float(stamp)
+    except (TypeError, ValueError):
+        heartbeat = 0.0
+    return worker or str(value), heartbeat
+
+
 class JobQueue(Protocol):
     def enqueue(self, job_id: str, *, priority: int = 100, delay_seconds: float = 0.0) -> None: ...
     def claim(self, worker_id: str, timeout: float = 1.0) -> str | None: ...
@@ -143,7 +157,7 @@ class InMemoryJobQueue:
     def touch(self, job_id: str, worker_id: str) -> None:
         with self._lock:
             if job_id in self._active:
-                self._active[job_id] = (worker_id, self._active[job_id][1])
+                self._active[job_id] = (worker_id, time.time())
 
     def depth(self) -> int:
         with self._lock:
@@ -217,10 +231,11 @@ class RedisJobQueue:
 
     def active_jobs(self) -> dict[str, str]:
         raw = self._client().hgetall(ACTIVE_KEY)
-        return {str(k): str(v) for k, v in raw.items()}
+        return {str(k): _active_entry(v)[0] for k, v in raw.items()}
 
     def active_since(self) -> dict[str, float]:
-        return {}
+        raw = self._client().hgetall(ACTIVE_KEY)
+        return {str(k): heartbeat for k, v in raw.items() if (heartbeat := _active_entry(v)[1]) > 0}
 
     def is_active(self, job_id: str) -> bool:
         return self._client().hexists(ACTIVE_KEY, job_id) == 1
@@ -229,7 +244,9 @@ class RedisJobQueue:
         return self._client().zscore(READY_KEY, job_id) is not None
 
     def touch(self, job_id: str, worker_id: str) -> None:
-        self._client().hset(ACTIVE_KEY, job_id, worker_id)
+        # The heartbeat lets another worker distinguish a live long render from a
+        # job abandoned by a dead process.
+        self._client().hset(ACTIVE_KEY, job_id, f"{worker_id}|{time.time()}")
 
     def depth(self) -> int:
         return int(self._client().zcard(READY_KEY))

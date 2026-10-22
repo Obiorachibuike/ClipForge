@@ -11,9 +11,7 @@ import json
 import re
 from pathlib import Path
 
-import pytest
 import yaml
-
 from app.core.config import Settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -261,9 +259,14 @@ def test_api_image_contains_the_migration_environment():
     container, which is exactly when it is needed.
     """
     dockerfile = (REPO_ROOT / "infrastructure/Dockerfile.api").read_text()
-    assert "apps/api/alembic.ini" in dockerfile
-    assert "apps/api/alembic " in dockerfile or "apps/api/alembic\n" in dockerfile
+    assert "COPY apps/api/alembic.ini /srv/app/apps/api/alembic.ini" in dockerfile
+    assert "COPY apps/api/alembic /srv/app/apps/api/alembic" in dockerfile
+    # The root-level copies must stay gone: those paths no longer exist and a
+    # dangling COPY fails the image build.
+    assert "COPY alembic.ini /srv/app/alembic.ini" not in dockerfile
     assert (REPO_ROOT / "apps/api/alembic.ini").exists()
     assert (REPO_ROOT / "apps/api/alembic" / "env.py").exists()
     versions = list((REPO_ROOT / "apps/api/alembic" / "versions").glob("*.py"))
     assert versions, "no migration revisions were generated"
+    requirements = (REPO_ROOT / "apps/api" / "requirements.txt").read_text().lower()
+    assert "alembic" in requirements, "the image cannot migrate without the package"

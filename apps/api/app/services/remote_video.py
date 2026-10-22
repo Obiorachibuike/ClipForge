@@ -6,22 +6,28 @@ the same validated upload/probe pipeline as a browser upload.
 """
 from __future__ import annotations
 
-import ipaddress
+import functools
 import mimetypes
 import socket
-from pathlib import Path
+import urllib.request
 from urllib.parse import urlsplit, urlunsplit
-
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errors import MediaError, NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.ssrf import (
+    SafeRedirectHandler,
+    SSRFBlocked,
+    assert_public_url,
+    is_public_ip,
+    safe_host_for_logs,
+)
 from app.models import Job, Project, ProjectStatus, User
 from app.services.job_service import JobService
 from app.services.pipeline.workspace import workspace_for
 from app.services.runtime import registry
 from app.services.upload_service import UploadService
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -64,6 +70,14 @@ def validate_remote_video_url(value: str) -> str:
             field="url",
         )
 
+    # Reject non-standard ports and embedded credentials here (cheap, no DNS).
+    try:
+        assert_public_url(raw, resolve=False)
+    except SSRFBlocked as exc:
+        raise ValidationError(
+            "Enter a public HTTP or HTTPS video URL on the standard ports.", field="url"
+        ) from exc
+
     # Strip fragments (they are never sent to servers) while preserving platform
     # query parameters such as YouTube's video id and TikTok share metadata.
     return urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, ""))
@@ -75,8 +89,8 @@ def assert_public_host(host: str) -> None:
     The platform allowlist already prevents arbitrary hosts, but DNS is data
     supplied by an external party: a hostname that resolves inside the
     deployment's network must never be fetched. Every resolved address is
-    checked (not just the first), and the check happens immediately before the
-    downloader runs.
+    checked (not just the first). The address policy itself lives in
+    `app.core.ssrf` so URL imports and the downloader's request guard agree.
     """
     try:
         infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -92,16 +106,67 @@ def assert_public_host(host: str) -> None:
             code="video_host_unresolvable",
         )
     for raw in addresses:
-        try:
-            address = ipaddress.ip_address(raw.split("%", 1)[0])
-        except ValueError:
-            continue
-        if not address.is_global or address.is_multicast:
+        if not is_public_ip(str(raw).split("%", 1)[0]):
             log.warning("remote_video.blocked_address", host=host, address=raw)
             raise MediaError(
                 "That video URL points to an address this deployment will not fetch.",
                 code="blocked_video_host",
             )
+
+
+def _guarded_youtube_dl(yt_dlp):
+    """Return a YoutubeDL subclass whose HTTP layer enforces the SSRF policy.
+
+    yt-dlp follows redirects and resolves its own CDN URLs. Checking only the
+    submitted page URL would let a redirect (or a rebinding DNS answer) reach
+    ``169.254.169.254`` or a service on the private network. Every request is
+    validated before urllib opens it, and redirect hops are validated by
+    :class:`SafeRedirectHandler`.
+
+    Falls back to the stock class if yt-dlp changes its networking internals;
+    the preflight in :func:`run_import` still blocks the obvious cases.
+    """
+    try:
+        from yt_dlp.networking._urllib import UrllibRH
+        from yt_dlp.YoutubeDL import _REQUEST_HANDLERS, _RH_PREFERENCES
+    except Exception:  # pragma: no cover - yt-dlp internal API changed
+        log.warning("remote_video.ssrf_guard_unavailable")
+        return yt_dlp.YoutubeDL
+
+    class GuardedUrllibRH(UrllibRH):
+        # Keep yt-dlp's registry key so its own compatibility paths still find
+        # the handler they expect (`handlers['Urllib']`).
+        RH_KEY = "Urllib"
+        RH_NAME = "urllib"
+
+        def _create_instance(self, proxies, cookiejar, legacy_ssl_support=None):
+            opener = super()._create_instance(proxies, cookiejar, legacy_ssl_support)
+            # Replace urllib's redirect handler: it would otherwise follow a
+            # 30x to a private address before any application code runs.
+            opener.handlers[:] = [
+                handler
+                for handler in opener.handlers
+                if not isinstance(handler, urllib.request.HTTPRedirectHandler)
+            ]
+            opener.add_handler(SafeRedirectHandler())
+            return opener
+
+        def _send(self, request):
+            # Validate the actual request URL, including the ones yt-dlp
+            # discovers for manifests and fragments.
+            assert_public_url(request.url, resolve=True)
+            return super()._send(request)
+
+    class GuardedYoutubeDL(yt_dlp.YoutubeDL):
+        @functools.cached_property
+        def _request_director(self):
+            handlers = [
+                GuardedUrllibRH if handler is UrllibRH else handler
+                for handler in _REQUEST_HANDLERS.values()
+            ]
+            return self.build_request_director(handlers, _RH_PREFERENCES)
+
+    return GuardedYoutubeDL
 
 
 def run_import(db: Session, job: Job) -> dict:
@@ -118,6 +183,18 @@ def run_import(db: Session, job: Job) -> dict:
         from yt_dlp.utils import DownloadError
     except ImportError as exc:  # pragma: no cover - deployment packaging guard
         raise MediaError("URL imports are unavailable on this deployment.", code="url_import_unavailable") from exc
+
+    # Full preflight (including DNS): refuse an allow-listed hostname that
+    # currently resolves to a private address. Request-time validation in the
+    # guarded downloader then covers redirects and CDN hosts.
+    try:
+        assert_public_url(source_url, allowed_hosts=SUPPORTED_VIDEO_HOSTS, resolve=True)
+    except SSRFBlocked as exc:
+        log.warning("remote_video.blocked_url", host=safe_host_for_logs(source_url), error=str(exc)[:200])
+        raise MediaError(
+            "That video URL resolves to a private or reserved address and cannot be imported.",
+            code="url_not_public",
+        ) from exc
 
     project.status = ProjectStatus.PROCESSING.value
     db.commit()
@@ -150,12 +227,24 @@ def run_import(db: Session, job: Job) -> dict:
         rejection: dict[str, str] = {}
 
         def duration_filter(info: dict, *, incomplete: bool = False) -> str | None:
+            """Ask the extractor to skip sources beyond this deployment's limit.
+
+            The probe enforces the same limit after download, so a source whose
+            duration is only known during/after download is still rejected.
+            """
             if incomplete:
                 return None
+            limit = int(settings.media_max_duration_seconds or 0)
+            if limit <= 0:
+                return None
             duration = info.get("duration")
-            if duration and float(duration) > settings.media_max_duration_seconds:
+            try:
+                value = float(duration) if duration is not None else None
+            except (TypeError, ValueError):
+                return None
+            if value is not None and value > limit:
                 rejection["reason"] = "video_too_long"
-                return f"Video exceeds the {settings.media_max_duration_seconds}-second limit"
+                return f"Video exceeds the {limit}-second limit"
             return None
 
         options = {
@@ -175,17 +264,24 @@ def run_import(db: Session, job: Job) -> dict:
             "progress_hooks": [progress_hook],
         }
 
+        downloader_cls = _guarded_youtube_dl(yt_dlp)
         try:
-            with yt_dlp.YoutubeDL(options) as downloader:
+            with downloader_cls(options) as downloader:
                 info = downloader.extract_info(source_url, download=True)
         except MediaError:
             raise
         except DownloadError as exc:
             if rejection.get("reason") == "video_too_long":
+                minutes = max(1, int(settings.media_max_duration_seconds // 60))
                 raise MediaError(
-                    "That video is longer than this deployment allows.", code="video_too_long"
+                    f"That video is longer than the {minutes}-minute limit for this deployment.",
+                    code="video_too_long",
                 ) from exc
-            log.warning("remote_video.download_failed", host=urlsplit(source_url).hostname, error=str(exc)[:500])
+            log.warning(
+                "remote_video.download_failed",
+                host=safe_host_for_logs(source_url),
+                error=str(exc)[:500],
+            )
             raise MediaError(
                 "The platform could not provide that video. Check that it is public and the URL is correct.",
                 code="video_download_failed",

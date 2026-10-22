@@ -255,3 +255,58 @@ def test_billing_plans_are_public_but_the_current_marker_needs_a_session(anon_ap
     for plan in signed_in["plans"]:
         assert plan["features"] and plan["tagline"]
         assert plan["limits"]["max_upload_bytes"] > 0
+
+
+def test_an_expired_upload_session_cannot_receive_chunks_or_complete(auth_api, db):
+    from datetime import timedelta
+
+    from app.models import UploadSession, utcnow
+
+    project_id = auth_api.post("/api/v1/projects", json={"name": "Expired"}).json()["id"]
+    session = auth_api.post(
+        "/api/v1/uploads/init",
+        json={
+            "filename": "late.mp4",
+            "size_bytes": 4096,
+            "content_type": "video/mp4",
+            "project_id": project_id,
+        },
+    ).json()
+
+    record = db.query(UploadSession).filter(UploadSession.upload_id == session["upload_id"]).one()
+    record.expires_at = utcnow() - timedelta(minutes=1)
+    db.commit()
+
+    # The session is still readable (the UI must be able to explain the state)…
+    assert auth_api.get(f"/api/v1/uploads/{session['upload_id']}").status_code == 200
+    # …but it is no longer writable.
+    chunk = auth_api.put(
+        f"/api/v1/uploads/{session['upload_id']}/chunk/0",
+        content=b"x" * 4096,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert chunk.status_code == 409
+    assert chunk.json()["code"] == "upload_expired"
+
+    complete = auth_api.post(f"/api/v1/uploads/{session['upload_id']}/complete")
+    assert complete.status_code == 409
+    assert complete.json()["code"] == "upload_expired"
+
+
+def test_an_incomplete_upload_cannot_be_marked_complete(auth_api):
+    project_id = auth_api.post("/api/v1/projects", json={"name": "Partial"}).json()["id"]
+    session = auth_api.post(
+        "/api/v1/uploads/init",
+        json={
+            "filename": "partial.mp4",
+            "size_bytes": 8192,
+            "content_type": "video/mp4",
+            "project_id": project_id,
+            "chunk_size": 256 * 1024,
+        },
+    ).json()
+    assert session["total_chunks"] == 1  # chunk_size is clamped to the minimum
+
+    response = auth_api.post(f"/api/v1/uploads/{session['upload_id']}/complete")
+    assert response.status_code == 409
+    assert response.json()["code"] in {"upload_incomplete", "upload_data_missing"}

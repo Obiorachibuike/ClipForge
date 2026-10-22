@@ -122,8 +122,8 @@ docker-compose.yml  the whole stack
 ## Tests
 
 ```bash
-./.venv/bin/python -m pytest apps/api/tests -q    # 158 backend tests (incl. real-media pipeline)
-cd apps/web && npm test                            # 105 frontend tests
+./.venv/bin/python -m pytest apps/api/tests -q    # 226 backend tests (incl. real-media pipeline)
+cd apps/web && npm test                            # 110 frontend tests
 cd apps/web && npx tsc --noEmit && npm run check:api
 ```
 

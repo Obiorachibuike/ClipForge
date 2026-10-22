@@ -9,20 +9,30 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import text
-
-from app.api.v1 import account, auth, clips, jobs, projects, renders, transcripts, videos
+from app.api.deps import CurrentUser
+from app.api.v1 import (
+    account,
+    auth,
+    clips,
+    jobs,
+    projects,
+    renders,
+    transcripts,
+    videos,
+)
 from app.core.config import settings
-from app.core.db import get_engine, get_session_factory, init_engine_if_needed
+from app.core.db import get_session_factory, init_engine_if_needed
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import check_rate_limit
 from app.services import events as ev
 from app.services.bootstrap import bootstrap
+from app.websocket.router import create_ticket, events_socket
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import text
 
 log = get_logger(__name__)
 
@@ -104,7 +114,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"https://.*\.e2b\.app",
+    # Only an explicitly configured preview-origin pattern is accepted; there is
+    # no built-in wildcard that would let any hosted preview origin read
+    # authenticated responses in production.
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -233,9 +246,6 @@ app.include_router(transcripts.router, prefix=API)
 app.include_router(clips.router, prefix=API)
 app.include_router(renders.router, prefix=API)
 app.include_router(jobs.router, prefix=API)
-
-from app.api.deps import CurrentUser  # noqa: E402
-from app.websocket.router import create_ticket, events_socket  # noqa: E402
 
 
 def _ws_ticket(user: CurrentUser) -> dict:

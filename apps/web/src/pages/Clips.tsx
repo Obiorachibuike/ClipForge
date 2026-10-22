@@ -1,14 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Lightbulb, Play, Scissors, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, Lightbulb, Play, Scissors, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query';
 import { useLive } from '@/lib/live';
 import { cn, formatDuration, formatTime } from '@/lib/format';
 import { Card, EmptyState, ErrorState, ProgressBar, SectionHeader, Skeleton, StatusDot } from '@/components/ui';
+import DiscoveryControls, { type DiscoveryOptions } from '@/pages/project/DiscoveryControls';
 import { toast } from '@/stores/ui';
 import type { Candidate, Job, Page } from '@/types/api';
+
+function DiscoveryOutcome({ job }: { job: Job }) {
+  const requested = Number(job.result?.requested);
+  const found = Number(job.result?.candidates);
+  if (!Number.isFinite(requested) || !Number.isFinite(found) || found >= requested) {
+    return null;
+  }
+  return (
+    <p className="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-4 py-3 text-sm text-amber-200">
+      Only {found} of the {requested} requested moments were found. ClipForge returns real transcript
+      moments rather than splitting the video at arbitrary points — try a longer source, or relax the length
+      limits.
+    </p>
+  );
+}
 
 const CATEGORY_TONES: Record<string, string> = {
   insight: 'bg-accent-500/15 text-accent-200',
@@ -186,8 +202,15 @@ export default function ClipsPage() {
     ),
   });
 
+  const jobs = useQuery({
+    queryKey: queryKeys.projectJobs(projectId),
+    queryFn: () => api.get<Job[]>(`/projects/${projectId}/jobs`),
+    refetchInterval: connection === 'open' ? false : 6000,
+  });
+
   const discover = useMutation({
-    mutationFn: () => api.post<Job>(`/projects/${projectId}/discover`),
+    mutationFn: (options: DiscoveryOptions) =>
+      api.post<Job>(`/projects/${projectId}/discover`, options),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectJobs(projectId) });
       toast({ kind: 'info', title: 'Clip discovery queued' });
@@ -220,6 +243,7 @@ export default function ClipsPage() {
 
   const videoId = project.data?.latest_video?.id ?? null;
   const items = candidates.data?.items ?? [];
+  const latestDiscovery = (jobs.data ?? []).find((job) => job.type === 'project.discover_clips');
   const counts = useMemo(
     () => ({
       all: candidates.data?.total ?? 0,
@@ -243,10 +267,6 @@ export default function ClipsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className="btn-secondary btn-sm" onClick={() => discover.mutate()} disabled={discover.isPending}>
-            <Sparkles className="h-3.5 w-3.5" aria-hidden />
-            Re-run discovery
-          </button>
           <button
             type="button"
             className="btn-primary btn-sm"
@@ -274,8 +294,12 @@ export default function ClipsPage() {
             {key === 'rejected' && counts.rejected ? ` (${counts.rejected})` : ''}
           </button>
         ))}
-        {discover.isPending ? <ProgressBar className="ml-2 max-w-[160px]" value={15} /> : null}
+        {discover.isPending ? (
+          <ProgressBar indeterminate label="Starting discovery" className="ml-2 max-w-[160px]" />
+        ) : null}
       </div>
+
+      {latestDiscovery?.status === 'succeeded' ? <DiscoveryOutcome job={latestDiscovery} /> : null}
 
       {candidates.isPending ? (
         <div className="space-y-4">
@@ -298,10 +322,10 @@ export default function ClipsPage() {
           title="No moments found yet"
           description="Clip discovery runs on a completed transcript. Start it from the project screen once transcription finishes."
           action={
-            <button type="button" className="btn-primary" onClick={() => discover.mutate()} disabled={discover.isPending}>
-              <Sparkles className="h-4 w-4" aria-hidden />
-              Find clips now
-            </button>
+            <DiscoveryControls
+              onStart={(options) => discover.mutate(options)}
+              pending={discover.isPending}
+            />
           }
         />
       ) : (

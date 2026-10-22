@@ -1,0 +1,26 @@
+# Lint contract for the Python API.
+#
+# Deliberately conservative: these rules catch real defects (undefined names,
+# unused imports/variables, import order, mutable class attributes, buggy
+# exception handling) without forcing stylistic churn in code that other
+# contributors are actively editing. Widening this list is a separate change.
+target-version = "py311"
+
+[lint]
+select = [
+    "E4",     # import conventions (E402 deferred imports, E401 multiple imports)
+    "E7",     # statement-level errors
+    "E9",     # runtime errors (syntax, indentation)
+    "F",      # pyflakes: undefined/unused names
+    "I",      # import order
+    "B017",   # assertRaises(Exception) is too broad
+    "C409",   # unnecessary list() around a literal
+    "ISC004", # implicit string concatenation in implicit concat contexts
+    "PLW0127",# self-assignment
+    "RUF012", # mutable class attribute without ClassVar
+    "RUF059", # unused unpacked variable
+]
+
+[lint.per-file-ignores]
+# Fixtures are re-exported from conftest for reuse in test modules.
+"apps/api/tests/*" = ["F811"]

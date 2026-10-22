@@ -5,7 +5,14 @@ import threading
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.services.storage.base import NoopStorage, ObjectInfo, RangeSpec, StorageBackend, safe_filename, validate_key
+from app.services.storage.base import (
+    NoopStorage,
+    ObjectInfo,
+    RangeSpec,
+    StorageBackend,
+    safe_filename,
+    validate_key,
+)
 from app.services.storage.local import LocalStorage
 
 log = get_logger(__name__)

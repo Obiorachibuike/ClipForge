@@ -7,7 +7,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from app.core.errors import StorageError
-from app.services.storage.base import ObjectInfo, RangeSpec, StorageBackend, validate_key
+from app.services.storage.base import (
+    ObjectInfo,
+    RangeSpec,
+    StorageBackend,
+    validate_key,
+)
 
 CHUNK = 1024 * 1024
 
@@ -23,7 +28,9 @@ class LocalStorage(StorageBackend):
     def _path(self, key: str) -> Path:
         safe = validate_key(key)
         path = (self.root / safe).resolve()
-        if not str(path).startswith(str(self.root)):
+        # `is_relative_to` compares path components, so a sibling such as
+        # `/srv/storage-evil` can never pass for `/srv/storage`.
+        if not path.is_relative_to(self.root):
             raise StorageError("Resolved storage path escaped the root directory.")
         return path
 

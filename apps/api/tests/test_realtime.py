@@ -204,6 +204,101 @@ def test_resync_snapshot_is_scoped_to_owned_projects(auth_api, query):
         assert payload["payload"]["jobs"] == []
 
 
+def test_connect_query_cannot_subscribe_to_a_foreign_project(auth_api, second_api):
+    """The `?project_id=` parameter is a subscription request and must be authorised.
+
+    Regression: the channel was added before any ownership check, so a caller who
+    knew another user's project id received that project's live events.
+    """
+    from app.services import events as ev
+
+    foreign_project = auth_api.post("/api/v1/projects", json={"name": "Private"}).json()["id"]
+
+    response = second_api.post("/api/v1/ws-ticket")
+    assert response.status_code == 200, response.text
+    ticket = response.json()["ticket"]
+    with second_api.client.websocket_connect(
+        f"/ws/v1/events?ticket={ticket}&project_id={foreign_project}"
+    ) as socket:
+        ready = socket.receive_json()
+        assert ready["type"] == "system.ready"
+        assert f"project:{foreign_project}" not in ready["payload"]["channels"]
+        socket.receive_json()  # initial resync
+
+        ev.get_event_bus().emit(
+            "candidate.created",
+            user_id=auth_api.user["id"],
+            project_id=foreign_project,
+            payload={"title": "leaked"},
+        )
+        socket.send_json({"action": "ping"})
+        assert socket.receive_json()["type"] == "system.heartbeat"
+
+
+def test_subscribing_to_another_users_job_channel_is_refused(auth_api, second_api, db):
+    """Job channels carry every job payload; they need the same ownership rule."""
+    from app.models import JobType
+    from app.services import events as ev
+    from app.services.job_service import JobService
+
+    foreign_job = JobService.create(
+        db,
+        type_=JobType.VIDEO_PROBE.value,
+        payload={"video_id": "x"},
+        user_id=auth_api.user["id"],
+        enqueue=False,
+    )
+
+    with open_socket(second_api) as socket:
+        socket.send_json({"action": "subscribe", "channels": [f"job:{foreign_job.id}"]})
+        response = socket.receive_json()
+        assert response["type"] == "system.subscribed"
+        assert f"job:{foreign_job.id}" not in response["payload"]["channels"]
+
+        ev.get_event_bus().emit(
+            "job.completed",
+            user_id=auth_api.user["id"],
+            job_id=foreign_job.id,
+            payload={"result": {"storage_key": "secret"}},
+        )
+        socket.send_json({"action": "ping"})
+        assert socket.receive_json()["type"] == "system.heartbeat"
+
+
+def _first_frame_with_origin(api, origin: str) -> dict:
+    response = api.post("/api/v1/ws-ticket")
+    assert response.status_code == 200, response.text
+    ticket = response.json()["ticket"]
+    with api.client.websocket_connect(
+        f"/ws/v1/events?ticket={ticket}", headers={"origin": origin}
+    ) as socket:
+        return socket.receive_json()
+
+
+def test_websocket_accepts_a_configured_origin(auth_api):
+    frame = _first_frame_with_origin(auth_api, "http://localhost:5173")
+    assert frame["type"] == "system.ready"
+
+
+def test_websocket_rejects_an_origin_that_only_shares_a_suffix(auth_api):
+    """Regression: `origin.endswith(host)` admitted look-alike origins."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        _first_frame_with_origin(auth_api, "http://evil-localhost:5173")
+
+
+def test_websocket_origin_regex_is_opt_in(auth_api, monkeypatch):
+    from app.core.config import settings
+    from starlette.websockets import WebSocketDisconnect
+
+    origin = "https://1234-preview.e2b.app"
+    with pytest.raises(WebSocketDisconnect):
+        _first_frame_with_origin(auth_api, origin)
+
+    monkeypatch.setattr(settings, "cors_origin_regex", r"https://.*\.e2b\.app")
+    assert _first_frame_with_origin(auth_api, origin)["type"] == "system.ready"
+
 def test_websocket_origin_is_compared_exactly_not_by_suffix():
     """`endswith` accepted `https://evil-example.com` for `https://example.com`."""
     from app.websocket.router import origin_allowed

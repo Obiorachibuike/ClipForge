@@ -9,9 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.errors import (
     AppError,
@@ -31,7 +28,6 @@ from app.models import (
     TranscriptWord,
     Video,
     VideoStatus,
-    utcnow,
 )
 from app.services.ai import registry as ai_registry
 from app.services.ai.types import TranscriptionResult
@@ -45,6 +41,8 @@ from app.services.media.audio_features import (
 from app.services.pipeline.workspace import workspace_for
 from app.services.storage import get_storage
 from app.services.usage_service import UsageService
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -108,7 +106,7 @@ def _run_pipeline(db: Session, job: Job, video: Video, transcript: Transcript) -
         # -------------------------------------------------- acoustics --------
         JobService.report_progress(db, job, stage="acoustics", progress=74, message="Measuring delivery and pauses")
         features = extract_features(audio_path, job_id=job.id)
-        turns, speaker_count, diarization_meta = _diarize(db, job, features)
+        turns, _speaker_count, diarization_meta = _diarize(db, job, features)
 
         # ------------------------------------------------- persist -----------
         JobService.report_progress(db, job, stage="persistence", progress=86, message="Saving transcript")
@@ -423,8 +421,7 @@ def _persist(
                 counts[word.speaker] = counts.get(word.speaker, 0) + 1
             segment_row.speaker = max(counts.items(), key=lambda kv: kv[1])[0]
 
-    # Pause + speech-rate stats need the sorted word list.
-    ordered = sorted(all_words, key=lambda w: w.start_time)
+    # Pause + speech-rate stats walk segments in order.
     previous_end = 0.0
     for segment_row in sorted(transcript.segments, key=lambda s: s.index):
         segment_row.pause_before = max(0.0, segment_row.start_time - previous_end)

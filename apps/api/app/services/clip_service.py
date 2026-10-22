@@ -4,9 +4,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -33,6 +30,8 @@ from app.services.job_service import JobService
 from app.services.media.ass import CAPTION_PRESETS, CaptionConfig
 from app.services.media.render_spec import RENDER_PRESETS, resolve_dimensions
 from app.services.usage_service import UsageService
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -85,7 +84,7 @@ class ClipService:
             video, candidate.start_time, candidate.end_time
         )
 
-        width, height, ratio = resolve_dimensions(preset, aspect_ratio or video.aspect_ratio)
+        _width, _height, ratio = resolve_dimensions(preset, aspect_ratio or video.aspect_ratio)
 
         crop = {"mode": "auto" if auto_framing else "center", "focus_x": 0.5, "focus_y": 0.5, "zoom": 1.0}
         framing = ClipService.framing_analysis(db, video.id)
@@ -349,7 +348,7 @@ class ClipService:
             if field in payload and payload[field] is not None:
                 setattr(clip, field, payload[field])
 
-        if "caption_style_id" in payload and payload["caption_style_id"]:
+        if payload.get("caption_style_id"):
             from app.models import CaptionStyle
 
             style = db.get(CaptionStyle, payload["caption_style_id"])

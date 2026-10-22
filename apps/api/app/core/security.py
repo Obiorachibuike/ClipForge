@@ -11,7 +11,6 @@ from typing import Any
 
 import bcrypt
 import jwt
-
 from app.core.config import settings
 from app.core.errors import AuthError, ValidationError
 

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import math
 import subprocess
-import time
 import wave
 from pathlib import Path
 
@@ -215,9 +214,8 @@ def test_real_media_runs_the_whole_pipeline(auth_api, db, tmp_path):
     assert transcript.word_count >= 10
     assert transcript.meta.get("has_word_timings") is True
 
-    from sqlalchemy import select
-
     from app.models import TranscriptWord
+    from sqlalchemy import select
 
     words = list(
         db.execute(

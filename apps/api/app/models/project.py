@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from app.models.base import Base, JSONColumn, TimestampMixin, UUIDMixin
+from app.models.enums import AnalysisKind, ProjectStatus, UploadStatus, VideoStatus
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -17,9 +19,6 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.models.base import Base, JSONColumn, TimestampMixin, UUIDMixin
-from app.models.enums import AnalysisKind, ProjectStatus, UploadStatus, VideoStatus
 
 if TYPE_CHECKING:
     from app.models.account import User

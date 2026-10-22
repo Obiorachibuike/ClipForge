@@ -4,9 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 from app.schemas.common import ORMModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------- projects ---
@@ -52,8 +51,8 @@ class ProjectSummary(ProjectOut):
     candidate_count: int = 0
     render_count: int = 0
     total_duration_seconds: float = 0.0
-    latest_video: "VideoOut | None" = None
-    active_jobs: list["JobOut"] = Field(default_factory=list)
+    latest_video: VideoOut | None = None
+    active_jobs: list[JobOut] = Field(default_factory=list)
     progress: float = 0.0
     stage: str = ""
 
@@ -197,7 +196,7 @@ class UploadStatusResponse(BaseModel):
 
 class UploadCompleteResponse(BaseModel):
     video: VideoOut
-    job: "JobOut"
+    job: JobOut
     message: str = "Upload complete. Processing has started."
 
 

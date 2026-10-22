@@ -40,8 +40,11 @@ COPY apps/api/app /srv/app/apps/api/app
 COPY apps/api/alembic.ini /srv/app/apps/api/alembic.ini
 COPY apps/api/alembic /srv/app/apps/api/alembic
 
-# `app` resolves from here; `scripts/` is copied for the type checker, which the
-# API container does not need at runtime but keeps the image self-contained.
+# `app` resolves from here. Migrations run from this image (`alembic upgrade
+# head`, with the working directory set to /srv/app/apps/api) so the API, the
+# worker and the schema are always deployed together. `scripts/` is copied for
+# the type checker, which the API container does not need at runtime but keeps
+# the image self-contained.
 COPY scripts /srv/app/scripts
 
 # Non-root runtime user; the media work directories are the only writable paths.

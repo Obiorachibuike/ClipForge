@@ -6,12 +6,9 @@ down, because a regression here would take the whole pipeline offline.
 """
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
 import pytest
-
 from app.core.config import settings
 from app.services import processor
 from app.services.media import ffmpeg
@@ -209,14 +206,12 @@ def test_readiness_reports_the_sidecar_but_never_degrades_over_it(client):
 
 def test_probe_falls_through_to_python_when_the_sidecar_answers_nothing(monkeypatch):
     """`run_probe` must not depend on the sidecar returning anything useful."""
-    from app.services import processor as processor_module
     from app.services.pipeline import video_jobs
 
     calls: list[str] = []
 
     def fake_sidecar(path):
         calls.append("sidecar")
-        return None
 
     def fake_python(path):
         calls.append("python")

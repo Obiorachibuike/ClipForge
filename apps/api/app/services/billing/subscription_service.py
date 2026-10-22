@@ -3,14 +3,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ValidationError
 from app.core.logging import get_logger
 from app.models import Payment, Plan, Subscription, SubscriptionStatus, User, utcnow
 from app.services.billing.plans import PLANS, plan_for
 from app.services.billing.provider import get_payment_provider
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

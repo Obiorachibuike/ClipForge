@@ -4,9 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from app.schemas.common import ORMModel
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------- candidates ---
@@ -64,6 +63,12 @@ class ClipCreate(BaseModel):
     preset: str = Field(default="generic_vertical", max_length=40)
     caption_preset: str | None = Field(default=None, max_length=40)
     auto_framing: bool = True
+
+    @field_validator("end_time")
+    @classmethod
+    def _positive(cls, value: float | None) -> float | None:
+        return value
+
 
 class ClipUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=300)
@@ -125,7 +130,7 @@ class ClipOut(ORMModel):
 class ClipDetail(ClipOut):
     video: dict[str, Any] = Field(default_factory=dict)
     candidate: CandidateOut | None = None
-    latest_render: "RenderOut | None" = None
+    latest_render: RenderOut | None = None
 
 
 class ClipDuplicateRequest(BaseModel):
