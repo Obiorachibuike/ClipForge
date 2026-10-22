@@ -95,23 +95,41 @@ export function ProgressBar({
   value,
   className,
   tone = 'accent',
+  indeterminate = false,
+  label,
 }: {
-  value: number;
+  value?: number;
   className?: string;
   tone?: 'accent' | 'success' | 'danger';
+  /** Unknown progress (a queued job): never fake a percentage. */
+  indeterminate?: boolean;
+  label?: string;
 }) {
-  const clamped = Math.max(0, Math.min(100, value));
+  const clamped = Math.max(0, Math.min(100, value ?? 0));
   const tones = {
     accent: 'from-accent-500 to-violet-500',
     success: 'from-emerald-500 to-emerald-400',
     danger: 'from-red-500 to-red-400',
   } as const;
+  if (indeterminate) {
+    return (
+      <div
+        className={cn('h-1.5 w-full overflow-hidden rounded-full bg-ink-700', className)}
+        role="progressbar"
+        aria-label={label ?? 'In progress'}
+        aria-valuetext={label ?? 'In progress'}
+      >
+        <div className={cn('h-full w-full animate-pulse rounded-full bg-gradient-to-r opacity-70', tones[tone])} />
+      </div>
+    );
+  }
   return (
     <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-ink-700', className)}>
       <div
         className={cn('h-full rounded-full bg-gradient-to-r transition-[width] duration-500 ease-premium', tones[tone])}
         style={{ width: `${clamped}%` }}
         role="progressbar"
+        aria-label={label}
         aria-valuenow={Math.round(clamped)}
         aria-valuemin={0}
         aria-valuemax={100}

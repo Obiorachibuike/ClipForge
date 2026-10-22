@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, FileVideo, Link2, LoaderCircle, Play, RefreshCw, Scissors, Upload, X } from 'lucide-react';
+import { AlertTriangle, FileVideo, Link2, LoaderCircle, Play, RefreshCw, Upload, X } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { queryKeys } from '@/lib/query';
 import { useProject } from '@/hooks/useProjects';
@@ -9,6 +9,7 @@ import { useLive } from '@/lib/live';
 import { cn, formatBytes, formatDuration, jobLabel } from '@/lib/format';
 import { Card, ErrorState, ProgressBar, SectionHeader, Skeleton, StatusDot } from '@/components/ui';
 import ScriptPanel from '@/pages/project/ScriptPanel';
+import DiscoveryControls, { type DiscoveryOptions } from '@/pages/project/DiscoveryControls';
 import { toast } from '@/stores/ui';
 import { useUpload } from '@/hooks/useUpload';
 import type { Job, ProjectSummary, Video } from '@/types/api';
@@ -214,7 +215,8 @@ function PipelineActions({ project }: { project: ProjectSummary }) {
   });
 
   const discover = useMutation({
-    mutationFn: () => api.post<Job>(`/projects/${project.id}/discover`),
+    mutationFn: (options: DiscoveryOptions) =>
+      api.post<Job>(`/projects/${project.id}/discover`, options),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectJobs(project.id) });
       toast({ kind: 'info', title: 'Clip discovery queued' });
@@ -243,15 +245,6 @@ function PipelineActions({ project }: { project: ProjectSummary }) {
           <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           {transcriptReady ? 'Re-transcribe' : 'Transcribe'}
         </button>
-        <button
-          type="button"
-          className="btn-primary btn-sm"
-          disabled={!transcriptReady || discover.isPending}
-          onClick={() => discover.mutate()}
-        >
-          <Scissors className="h-3.5 w-3.5" aria-hidden />
-          Find clips
-        </button>
         <Link
           to={`/projects/${project.id}/analyze`}
           className={cn('btn-secondary btn-sm', !video && 'pointer-events-none opacity-50')}
@@ -269,6 +262,13 @@ function PipelineActions({ project }: { project: ProjectSummary }) {
           </button>
         ) : null}
       </div>
+
+      <DiscoveryControls
+        onStart={(options) => discover.mutate(options)}
+        pending={discover.isPending}
+        disabled={!transcriptReady}
+        compact
+      />
 
       {active.length > 0 ? (
         <div className="space-y-2">
