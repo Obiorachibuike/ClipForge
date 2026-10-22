@@ -54,6 +54,11 @@ class ConflictError(AppError):
         super().__init__(message, code=code, status_code=409)
 
 
+class PayloadTooLargeError(AppError):
+    def __init__(self, message: str = "The request body is larger than this endpoint accepts.", **details: Any) -> None:
+        super().__init__(message, code="payload_too_large", status_code=413, details=details)
+
+
 class RateLimitedError(AppError):
     def __init__(self, retry_after: int = 60) -> None:
         super().__init__(

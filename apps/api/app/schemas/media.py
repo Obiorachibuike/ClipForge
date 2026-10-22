@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import ORMModel
 
@@ -119,6 +119,28 @@ class VideoUpdate(BaseModel):
     # Optional narration script. When present, transcription aligns the script to
     # the audio (real DTW word timings) instead of requiring ASR model weights.
     narration_script: str | None = Field(default=None, max_length=200_000)
+
+
+class DiscoverClipsRequest(BaseModel):
+    """User-tunable clip discovery settings.
+
+    Identifiers (project, video, transcript) are never accepted from the client:
+    they are resolved server-side from the owned project. Extra keys are rejected
+    so a stale or malicious client cannot smuggle `video_id`/`project_id` into the
+    job payload.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_candidates: int = Field(default=12, ge=1, le=40)
+    min_duration: float = Field(default=10.0, ge=5.0, le=120.0)
+    max_duration: float = Field(default=95.0, ge=5.0, le=180.0)
+
+    @model_validator(mode="after")
+    def _ordered_durations(self) -> "DiscoverClipsRequest":
+        if self.max_duration < self.min_duration:
+            raise ValueError("max_duration must be greater than or equal to min_duration")
+        return self
 
 
 class UploadInitRequest(BaseModel):

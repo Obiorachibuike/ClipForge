@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.schemas.common import OkResponse, Page
 from app.schemas.media import (
+    DiscoverClipsRequest,
     JobOut,
     ProjectCreate,
     ProjectOut,
@@ -142,8 +143,18 @@ def restore_project(project_id: str, db: DbSession, user: CurrentUser) -> Projec
 
 
 @router.post("/{project_id}/discover", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def discover_clips(project_id: str, db: DbSession, user: CurrentUser, body: dict | None = None) -> JobOut:
-    """Queue the clip discovery pipeline for this project."""
+def discover_clips(
+    project_id: str,
+    db: DbSession,
+    user: CurrentUser,
+    body: DiscoverClipsRequest | None = None,
+) -> JobOut:
+    """Queue the clip discovery pipeline for this project.
+
+    Only the validated discovery settings are taken from the request body. The
+    project/video identifiers are resolved from the owned project, so a client
+    cannot point a job at another account's media.
+    """
     project = owned_project(db, user, project_id)
     video = db.execute(
         select(Video).where(Video.project_id == project.id).order_by(Video.created_at.desc())
@@ -164,7 +175,8 @@ def discover_clips(project_id: str, db: DbSession, user: CurrentUser, body: dict
     if any(job.type == JobType.PROJECT_DISCOVER_CLIPS.value for job in active_jobs):
         raise ConflictError("Clip discovery is already running for this project.", code="discovery_running")
 
-    payload = {"project_id": project.id, "video_id": video.id, **(body or {})}
+    discovery_settings = (body or DiscoverClipsRequest()).model_dump()
+    payload = {"project_id": project.id, "video_id": video.id, **discovery_settings}
     project.status = ProjectStatus.PROCESSING.value
     db.commit()
     job = JobService.create(

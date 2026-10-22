@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     media_ffprobe_path: str = ""
     media_max_upload_bytes: int = 10 * 1024 * 1024 * 1024
     media_min_upload_bytes: int = 1024
+    # Source-length ceiling. Checked after probing, so it applies equally to
+    # browser uploads and URL imports.
+    media_max_duration_seconds: int = 4 * 60 * 60
     media_allowed_extensions: str = "mp4,mov,mkv,webm,m4v,avi,mp3,m4a,wav,flac,ogg,ts"
     media_allowed_mime_prefixes: str = "video/,audio/"
     media_probe_timeout_seconds: int = 120
@@ -275,6 +278,57 @@ def _resolve_binary(explicit: str, name: str) -> str:
             pass
     found = shutil.which(name)
     return found or ""
+
+
+_KNOWN_INSECURE_SECRETS = {
+    "",
+    "dev-only-insecure-secret-change-me",
+    "change-me",
+    "changeme",
+    "secret",
+    "test-secret",
+}
+
+
+def validate_runtime_settings(cfg: Settings | None = None) -> list[str]:
+    """Fail closed on unsafe production configuration.
+
+    Production must never sign sessions or derive the provider-key encryption
+    key from a value that is published in this repository. Non-fatal weaknesses
+    are returned so the bootstrap can log them explicitly.
+
+    Called at API and worker startup (not at import time) so tests, migrations
+    and CLIs can still construct settings.
+    """
+    cfg = cfg or settings
+    if not cfg.is_production:
+        return []
+
+    problems: list[str] = []
+    for name, value in (("SECRET_KEY", cfg.secret_key), ("JWT_SECRET", cfg.jwt_secret)):
+        if value.strip().lower() in _KNOWN_INSECURE_SECRETS or len(value.strip()) < 32:
+            problems.append(f"{name} must be a random value of at least 32 characters")
+    if problems:
+        raise RuntimeError(
+            "Insecure production configuration: "
+            + "; ".join(problems)
+            + '. Generate values with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+
+    warnings: list[str] = []
+    if not cfg.cookie_secure:
+        warnings.append("COOKIE_SECURE is false: session cookies can travel over plain HTTP")
+    if cfg.auto_create_tables:
+        warnings.append(
+            "AUTO_CREATE_TABLES is true: run `alembic upgrade head` and set AUTO_CREATE_TABLES=false"
+        )
+    if cfg.storage_backend == "local":
+        warnings.append(
+            "STORAGE_BACKEND=local is not durable across hosts; use S3-compatible storage"
+        )
+    if not cfg.cors_origins.strip():
+        warnings.append("CORS_ORIGINS is empty: the browser app will not be able to call the API")
+    return warnings
 
 
 @lru_cache

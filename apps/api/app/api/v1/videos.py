@@ -24,7 +24,7 @@ from app.api.deps import (
     upload_rate_limit,
 )
 from app.core.config import settings
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, PayloadTooLargeError, ValidationError
 from app.core.logging import get_logger
 from app.models import (
     JobType,
@@ -234,8 +234,15 @@ async def upload_chunk(
     db: DbSession,
     user: CurrentUser,
 ) -> UploadStatusResponse:
-    """Receive one chunk. Chunks may arrive in any order; retries are safe."""
-    body = await request.body()
+    """Receive one chunk. Chunks may arrive in any order; retries are safe.
+
+    The exact expected size is known before the body is read, so an oversized
+    request is rejected without buffering it. Reading `request.body()` first
+    would let any authenticated client force unbounded memory use in the API
+    process before the size check ran.
+    """
+    expected = UploadService.expected_chunk_bytes(db, user, upload_id, index)
+    body = await _read_chunk_body(request, expected)
     if not body:
         raise ValidationError("Empty chunk.", field="chunk")
     session = UploadService.receive_chunk(db, user, upload_id, index, body)
@@ -442,6 +449,27 @@ def video_signed_url(video_id: str, db: DbSession, user: CurrentUser, ttl: int =
 
 
 # ------------------------------------------------------------------ helpers ---
+async def _read_chunk_body(request: Request, expected: int) -> bytes:
+    """Read at most `expected` bytes from the request stream.
+
+    Trusts no Content-Length header: the ASGI stream itself is bounded, so a
+    missing or lying header cannot make the API buffer more than one chunk.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > expected:
+        raise PayloadTooLargeError(
+            f"This chunk must contain exactly {expected} bytes.", expected=expected, received=int(declared)
+        )
+    buffer = bytearray()
+    async for part in request.stream():
+        buffer.extend(part)
+        if len(buffer) > expected:
+            raise PayloadTooLargeError(
+                f"This chunk must contain exactly {expected} bytes.", expected=expected, received=len(buffer)
+            )
+    return bytes(buffer)
+
+
 def _status_payload(session: UploadSession) -> UploadStatusResponse:
     received = sorted(int(k) for k in (session.received_chunks or {}))
     progress = (session.received_bytes / session.size_bytes * 100) if session.size_bytes else 0.0

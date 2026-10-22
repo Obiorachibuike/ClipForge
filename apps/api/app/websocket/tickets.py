@@ -44,9 +44,14 @@ def consume_ticket(token: str) -> dict | None:
     if client is not None:
         try:
             key = f"{TICKET_PREFIX}{token}"
-            user_id = client.get(key)
+            # GET followed by DELETE is two round trips, so two simultaneous
+            # upgrades could both read the same ticket before either deleted it.
+            # A MULTI/EXEC pipeline (redis-py's default) burns it atomically.
+            pipe = client.pipeline()
+            pipe.get(key)
+            pipe.delete(key)
+            user_id = pipe.execute()[0]
             if user_id:
-                client.delete(key)
                 return {"user_id": str(user_id)}
             return _consume_memory(token)
         except Exception as exc:  # pragma: no cover
