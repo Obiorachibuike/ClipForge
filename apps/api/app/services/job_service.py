@@ -24,6 +24,11 @@ log = get_logger(__name__)
 
 PROGRESS_MIN_INTERVAL = 0.6  # seconds between persisted progress writes
 PROGRESS_MIN_DELTA = 0.5  # percentage points
+# Cross-process cancellation: the HTTP process writes `cancel_requested` and the
+# Redis flag, so a worker in another container must poll the durable state while
+# it reports progress. Checked at most this often per job.
+CANCEL_POLL_SECONDS = 2.0
+_last_cancel_poll: dict[str, float] = {}
 
 
 def _now() -> datetime:
@@ -180,6 +185,8 @@ class JobService:
                 job_id=job.id,
                 payload=payload,
             )
+        if _durable_cancel_requested(db, job):
+            raise CancelledError_()
         registry.token(job.id).raise_if_cancelled()
 
     @staticmethod
@@ -200,6 +207,7 @@ class JobService:
             payload=JobService.serialize(job),
         )
         log.info("job.completed", job_id=job.id, type=job.type, seconds=round(job.duration_seconds, 1))
+        _forget_job(job.id)
         registry.clear(job.id)
         return job
 
@@ -222,6 +230,7 @@ class JobService:
             payload=JobService.serialize(job),
         )
         log.error("job.failed", job_id=job.id, type=job.type, code=job.error_code, error=str(exc)[:500])
+        _forget_job(job.id)
         registry.clear(job.id)
         return job
 
@@ -241,6 +250,7 @@ class JobService:
             payload=JobService.serialize(job),
         )
         log.info("job.cancelled", job_id=job.id, type=job.type)
+        _forget_job(job.id)
         registry.clear(job.id)
         return job
 
@@ -384,6 +394,34 @@ class JobService:
             else:
                 JobService.mark_failed(db, job, AppError("Processing stopped unexpectedly.", code="worker_lost"))
         return requeued
+
+
+def _durable_cancel_requested(db: Session, job: Job) -> bool:
+    """Poll cancellation state that other processes can write.
+
+    `registry` is process-local, so it only sees cancels requested inside the
+    worker. Long stages call `report_progress` continuously; polling the durable
+    flag there makes cancellation effective across API and worker replicas.
+    """
+    now = time.time()
+    if now - _last_cancel_poll.get(job.id, 0.0) < CANCEL_POLL_SECONDS:
+        return False
+    _last_cancel_poll[job.id] = now
+    try:
+        flag = db.execute(select(Job.cancel_requested).where(Job.id == job.id)).scalar_one_or_none()
+    except Exception:  # pragma: no cover - do not fail progress reporting
+        db.rollback()
+        return False
+    if flag:
+        return True
+    try:
+        return bool(get_queue().is_cancelled(job.id))
+    except Exception:  # pragma: no cover - queue outage must not fail progress
+        return False
+
+
+def _forget_job(job_id: str) -> None:
+    _last_cancel_poll.pop(job_id, None)
 
 
 def _duration(job: Job) -> float:

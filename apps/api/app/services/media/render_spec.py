@@ -178,7 +178,11 @@ def build_plan(
         crop_x, crop_y = str(x), str(y)
     elif mode in ("auto", "track") and background_mode == "smart_fill" and keyframes:
         crop_width, crop_height, x_expr, y_expr = crop_expression(
-            keyframes, clip_start=start, source_width=source_width, source_height=source_height
+            keyframes,
+            clip_start=start,
+            clip_end=end,
+            source_width=source_width,
+            source_height=source_height,
         )
         crop_x, crop_y = x_expr, y_expr
         if strategy:

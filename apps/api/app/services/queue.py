@@ -64,7 +64,10 @@ class InMemoryJobQueue:
     name = "memory"
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        # Re-entrant: `release()` holds the condition while calling `enqueue()`,
+        # which re-acquires it. A plain Lock deadlocked the worker thread on the
+        # first release (confirmed by test_queue_release_requeues_without_blocking).
+        self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)
         self._heap: list[tuple[float, str]] = []
         self._queued: set[str] = set()
@@ -175,8 +178,15 @@ class RedisJobQueue:
                     self._script_sha = client.script_load(_CLAIM_SCRIPT)
                 job_id = client.evalsha(self._script_sha, 2, READY_KEY, ACTIVE_KEY, worker_id, time.time())
             except Exception:
+                # A missing cached script (NOSCRIPT after a Redis restart) is
+                # expected; reload it. Do not let other connection errors strand
+                # the worker: surface them as QueueUnavailable so the caller can
+                # back off and retry instead of exiting the process.
                 self._script_sha = None
-                job_id = client.eval(_CLAIM_SCRIPT, 2, READY_KEY, ACTIVE_KEY, worker_id, time.time())
+                try:
+                    job_id = client.eval(_CLAIM_SCRIPT, 2, READY_KEY, ACTIVE_KEY, worker_id, time.time())
+                except Exception as exc:
+                    raise QueueUnavailable(f"Redis claim failed: {type(exc).__name__}") from exc
             if job_id:
                 return job_id
             if time.time() >= deadline:

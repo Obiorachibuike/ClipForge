@@ -23,7 +23,9 @@ def _project_and_video(auth_api) -> tuple[str, str]:
     )
     assert init.status_code in (200, 201), init.text
     session = init.json()
-    payload = (b"not-a-real-video!" * 300)[:4096]
+    # The API sniffs container headers; this is a header-only stand-in for a
+    # real MP4 (the tests below swap in real bytes where decoding matters).
+    payload = (b"\x00\x00\x00\x20ftypisom" + b"not-a-real-video!" * 300)[:4096]
     for index in range(session["total_chunks"]):
         auth_api.put(f"/api/v1/uploads/{session['upload_id']}/chunk/{index}", content=payload)
     complete = auth_api.post(f"/api/v1/uploads/{session['upload_id']}/complete")
@@ -330,7 +332,9 @@ def test_video_transcript_route_returns_words(auth_api, db):
             "project_id": other["id"],
         },
     ).json()
-    payload = (b"not-a-real-video!" * 300)[:4096]
+    # The API sniffs container headers; this is a header-only stand-in for a
+    # real MP4 (the tests below swap in real bytes where decoding matters).
+    payload = (b"\x00\x00\x00\x20ftypisom" + b"not-a-real-video!" * 300)[:4096]
     for index in range(init["total_chunks"]):
         auth_api.put(f"/api/v1/uploads/{init['upload_id']}/chunk/{index}", content=payload)
     second_video = auth_api.post(f"/api/v1/uploads/{init['upload_id']}/complete").json()["video"]["id"]

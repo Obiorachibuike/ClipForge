@@ -23,6 +23,7 @@ import asyncio
 import json
 import time
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
@@ -37,6 +38,28 @@ from app.websocket.manager import manager, resync_snapshot
 from app.websocket.tickets import consume_ticket
 
 log = get_logger(__name__)
+
+
+def origin_allowed(origin: str | None, host: str) -> bool:
+    """Exact-origin policy for WebSocket upgrades.
+
+    An `endswith` comparison is not an origin check: with
+    `https://example.com` configured it also accepted
+    `https://evil-example.com`. Only an exact configured origin, or the same
+    host the upgrade was addressed to (reverse proxies and previews), is
+    allowed. Requests without an Origin header are native clients, not
+    browsers, and keep working.
+    """
+    if not origin:
+        return True
+    parsed = urlparse(origin.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    normalized = f"{parsed.scheme}://{parsed.netloc}".lower()
+    allowed = {item.strip().rstrip("/").lower() for item in settings.cors_origin_list if item.strip()}
+    if normalized in allowed:
+        return True
+    return bool(host) and parsed.netloc.lower() == host.strip().lower()
 router = APIRouter()
 
 
@@ -94,13 +117,10 @@ async def events_socket(
     project_id: str | None = Query(default=None),
 ) -> None:
     origin = websocket.headers.get("origin")
-    if origin and settings.cors_origin_list and origin not in settings.cors_origin_list:
-        # Same-origin previews and custom hosts are permitted via CORS_ORIGINS.
-        allowed = any(origin.endswith(url.split("//")[-1]) for url in settings.cors_origin_list)
-        if not allowed:
-            log.info("ws.origin_rejected", origin=origin)
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
-            return
+    if not origin_allowed(origin, websocket.headers.get("host", "")):
+        log.info("ws.origin_rejected", origin=origin)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
+        return
 
     identity = _authenticate(websocket, ticket)
     if identity is None:

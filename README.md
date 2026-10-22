@@ -117,12 +117,13 @@ docker-compose.yml  the whole stack
 | [docs/api.md](docs/api.md) | REST endpoints, auth and CSRF, errors, WebSocket protocol |
 | [docs/deployment.md](docs/deployment.md) | Compose, configuration, scaling, production checklist, known gaps |
 | [docs/development.md](docs/development.md) | Local setup, demo media, test suites, troubleshooting |
+| [docs/audit.md](docs/audit.md) | Evidence-based audit, findings and fixes, test matrix, remaining blockers |
 
 ## Tests
 
 ```bash
-./.venv/bin/python -m pytest apps/api/tests -q    # 95 backend tests
-cd apps/web && npm test                            # 99 frontend tests
+./.venv/bin/python -m pytest apps/api/tests -q    # 158 backend tests (incl. real-media pipeline)
+cd apps/web && npm test                            # 105 frontend tests
 cd apps/web && npx tsc --noEmit && npm run check:api
 ```
 
@@ -131,11 +132,15 @@ from the live OpenAPI schema.
 
 ## Verification status
 
-The repository contains the real upload, probing, transcription, discovery,
-framing, caption, rendering and export implementations. The API/worker dependency
-and storage boundary described above is subject to the checks run for the
-current change; it does not imply that a Vercel deployment or its 500 MB bundle
-limit has been verified. The Playwright suite, Rust container build and full
-Compose integration require their respective external tools/services. See the
-"Known deployment gaps" section of [docs/deployment.md](docs/deployment.md) and
-the implementation report for current check results.
+The upload, probing, transcription, script alignment, discovery, framing, caption,
+rendering and export implementations are real. The current test suite includes an
+integration test that synthesises real speech, builds a real MP4, runs
+probe → transcribe → discover → render, decodes the output and correlates its
+audio against the selected source interval (`apps/api/tests/test_media_pipeline.py`).
+
+The database schema is managed by Alembic (`apps/api/alembic/`); upgrade,
+downgrade and drift checks run against SQLite in the test suite. PostgreSQL, a
+Vercel deployment (including its function-bundle limit), a Docker build, the Rust
+container and the Playwright suite have **not** been verified in this environment.
+See `docs/audit.md` for the evidence-based audit and the exact status of every
+check, and "Known deployment gaps" in [docs/deployment.md](docs/deployment.md).

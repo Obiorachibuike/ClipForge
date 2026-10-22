@@ -7,7 +7,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.errors import MediaError, NotFoundError
+from app.core.errors import MediaError, NotFoundError, user_message
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models import Job, Project, ProjectStatus, UploadSession, Video, VideoStatus
 from app.services.job_service import JobService
@@ -106,6 +107,27 @@ def run_probe(db: Session, job: Job) -> dict:
 
     video.status = VideoStatus.PROBING.value
     db.commit()
+    try:
+        return _probe_media(db, job, video)
+    except BaseException as exc:
+        # A failed probe must not leave the video permanently "probing": the UI
+        # and every downstream guard depend on this terminal state.
+        _mark_video_failed(db, video, exc)
+        raise
+
+
+def _mark_video_failed(db: Session, video: Video, exc: BaseException) -> None:
+    try:
+        db.rollback()
+        video.status = VideoStatus.FAILED.value
+        video.error_message = user_message(exc)[:1000]
+        db.commit()
+    except Exception:  # pragma: no cover - the original error is what matters
+        db.rollback()
+        log.exception("probe.failure_state_not_saved", video_id=video.id)
+
+
+def _probe_media(db: Session, job: Job, video: Video) -> dict:
     JobService.report_progress(db, job, stage="prepare", progress=2, message="Preparing source media", force=True)
 
     storage = get_storage()
@@ -155,6 +177,14 @@ def run_probe(db: Session, job: Job) -> dict:
         probe = sidecar.probe_media(local) or ffmpeg.probe_media(local)
         if probe["duration"] <= 0:
             raise MediaError("This file reports no duration and cannot be processed.", code="invalid_media")
+        max_duration = int(settings.media_max_duration_seconds or 0)
+        if max_duration and float(probe["duration"]) > max_duration:
+            hours = max_duration / 3600
+            raise MediaError(
+                f"That video is {float(probe['duration']) / 3600:.1f} hours long; this deployment accepts "
+                f"at most {hours:.1f} hours per source.",
+                code="video_too_long",
+            )
 
         video.duration_seconds = float(probe["duration"])
         video.width = int(probe["width"])

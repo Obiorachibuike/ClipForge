@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
 
@@ -64,12 +64,6 @@ class ClipCreate(BaseModel):
     preset: str = Field(default="generic_vertical", max_length=40)
     caption_preset: str | None = Field(default=None, max_length=40)
     auto_framing: bool = True
-
-    @field_validator("end_time")
-    @classmethod
-    def _positive(cls, value: float | None) -> float | None:
-        return value
-
 
 class ClipUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=300)

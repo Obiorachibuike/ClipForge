@@ -418,6 +418,17 @@ def _category(scores: dict[str, float], window: Sequence[Sentence]) -> str:
     return max(votes.items(), key=lambda kv: kv[1])[0] if votes else "insight"
 
 
+def _is_fragment(sentence: Sentence) -> bool:
+    """A split sentence tail that cannot open a clip on its own.
+
+    Transcript sentence boundaries come from punctuation *and* a hard duration
+    cap, so a long sentence is occasionally split after its last comma. The
+    tail keeps the original punctuation ("... it is noise.") but starts
+    mid-thought. Two words or fewer is the reliable signal.
+    """
+    return sentence.word_count <= 2
+
+
 def _is_context_dependent(text: str) -> bool:
     first_word = re.sub(r"[^\w']", "", text.strip().split(" ")[0].lower()) if text.strip() else ""
     return first_word in CONTEXT_DEPENDENT_OPENERS
@@ -512,10 +523,26 @@ def generate_candidates(
     raw: list[Candidate] = []
     count = len(sentences)
     existing_vectors: list[list[float]] = []
+    seen_windows: set[tuple[int, int]] = set()
 
     for start_index in range(count):
+        # A sentence fragment is what a forced split (long sentence without
+        # punctuation) leaves behind. Starting a clip on "noise." or "it." reads
+        # as a broken edit, so pull the window back one sentence when that still
+        # fits the duration budget. The previous sentence supplies the context.
+        window_start = start_index
+        while (
+            window_start > 0
+            and _is_fragment(sentences[window_start])
+            and sentences[start_index].end - sentences[window_start - 1].start <= max_duration
+        ):
+            window_start -= 1
         for end_index in range(start_index, count):
-            window = _make_window(sentences, start_index, end_index)
+            key = (window_start, end_index)
+            if key in seen_windows:
+                continue
+            seen_windows.add(key)
+            window = _make_window(sentences, window_start, end_index)
             duration = window[-1].end - window[0].start
             if duration < min_duration:
                 continue
@@ -623,10 +650,33 @@ def extractive_title(candidate: Candidate) -> str:
         if len(title) + len(word) + 1 > 62:
             break
         title = f"{title} {word}".strip()
-    title = title.rstrip(" ,;:-")
-    if title and title[-1] not in ".!?":
-        title = title
+    title = _trim_trailing_clause(title)
     return title[:70]
+
+
+_TRAILING_WORDS = {
+    "a", "an", "and", "as", "at", "because", "but", "by", "for", "from", "if",
+    "in", "into", "of", "on", "or", "so", "that", "the", "then", "to", "when",
+    "while", "with", "you", "your",
+}
+
+
+def _trim_trailing_clause(title: str) -> str:
+    """Never end a title with a dangling conjunction or preposition.
+
+    The 62-character cap can land mid-clause ("... clever and you"). Prefer the
+    last comma/dash inside the cap, then drop trailing function words, so the
+    title ends on a spoken idea instead of a stray "and".
+    """
+    title = title.rstrip(" ,;:-")
+    cut = max(title.rfind(","), title.rfind(";"), title.rfind(" - "))
+    if cut >= 20:
+        title = title[:cut].rstrip(" ,;:-")
+    words = title.split(" ")
+    while len(words) > 1 and words[-1].lower().strip(".,!?") in _TRAILING_WORDS:
+        words.pop()
+    trimmed = " ".join(words).rstrip(" ,;:-")
+    return trimmed or title
 
 
 def extractive_hook(candidate: Candidate) -> str:

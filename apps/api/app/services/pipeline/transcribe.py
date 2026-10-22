@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.core.errors import (
     NotFoundError,
     ProviderError,
     ProviderUnavailableError,
+    user_message,
 )
 from app.core.logging import get_logger
 from app.models import (
@@ -61,6 +63,16 @@ def run(db: Session, job: Job) -> dict:
         )
 
     transcript = _prepare_transcript(db, video, job)
+    try:
+        return _run_pipeline(db, job, video, transcript)
+    except BaseException as exc:
+        # Never leave a transcript row "running" forever after a failure, and
+        # never delete the previously completed transcript in the process.
+        _mark_transcript_failed(db, transcript, exc)
+        raise
+
+
+def _run_pipeline(db: Session, job: Job, video: Video, transcript: Transcript) -> dict:
     JobService.report_progress(db, job, stage="prepare", progress=3, message="Preparing audio", force=True)
 
     storage = get_storage()
@@ -247,7 +259,35 @@ class _WordRef:
 
 
 def _prepare_transcript(db: Session, video: Video, job: Job) -> Transcript:
-    """Reuse an existing pending transcript or create a new one."""
+    """Reuse an unfinished transcript row, or create a new one.
+
+    A retry must not accumulate empty transcript rows: an interrupted or failed
+    attempt is reused (its segments/words are replaced on success), while the
+    last completed transcript is left intact until a replacement is written.
+    """
+    existing = db.execute(
+        select(Transcript)
+        .where(
+            Transcript.video_id == video.id,
+            Transcript.status.in_(
+                [
+                    TranscriptStatus.PENDING.value,
+                    TranscriptStatus.RUNNING.value,
+                    TranscriptStatus.FAILED.value,
+                ]
+            ),
+        )
+        .order_by(Transcript.created_at.desc())
+    ).scalars().first()
+    if existing is not None:
+        existing.status = TranscriptStatus.RUNNING.value
+        existing.error_message = ""
+        existing.provider = ""
+        existing.model = ""
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     transcript = Transcript(
         video_id=video.id,
         project_id=video.project_id,
@@ -259,6 +299,18 @@ def _prepare_transcript(db: Session, video: Video, job: Job) -> Transcript:
     db.commit()
     db.refresh(transcript)
     return transcript
+
+
+def _mark_transcript_failed(db: Session, transcript: Transcript, exc: BaseException) -> None:
+    """Persist a terminal failure state with a user-safe reason."""
+    try:
+        db.rollback()
+        transcript.status = TranscriptStatus.FAILED.value
+        transcript.error_message = user_message(exc)[:2000]
+        db.commit()
+    except Exception:  # pragma: no cover - the original error is what matters
+        db.rollback()
+        log.exception("transcription.failure_state_not_saved", transcript_id=transcript.id)
 
 
 def _extract_audio(source: Path, audio_path: Path, video: Video, db: Session, job: Job) -> None:
@@ -400,8 +452,22 @@ def _persist(
             "hop_seconds": 0.01,
         },
         "provider_meta": result.meta,
+        # Caption rendering uses segment-level timing when this is false rather
+        # than presenting interpolated word times as measured word timings.
+        "synthetic_word_timings": not result.has_word_timings,
     }
     transcript.speaker_count = int(diarization_meta.get("speakers", 1) or 1)
+    # Only one transcript per video is "current". The previous completed row is
+    # retained for audit but excluded from current-transcript lookups.
+    db.execute(
+        update(Transcript)
+        .where(
+            Transcript.video_id == transcript.video_id,
+            Transcript.id != transcript.id,
+            Transcript.status == TranscriptStatus.COMPLETED.value,
+        )
+        .values(status=TranscriptStatus.SUPERSEDED.value)
+    )
     db.commit()
 
 

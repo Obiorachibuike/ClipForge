@@ -35,6 +35,10 @@ COPY apps/api/requirements-worker.txt /srv/app/requirements-worker.txt
 RUN pip install --no-cache-dir -r /srv/app/requirements-worker.txt
 
 COPY apps/api/app /srv/app/apps/api/app
+# Migration environment. The API/worker container must be able to run
+# `alembic upgrade head` as a deployment step; Vercel only serves HTTP.
+COPY apps/api/alembic.ini /srv/app/apps/api/alembic.ini
+COPY apps/api/alembic /srv/app/apps/api/alembic
 
 # `app` resolves from here; `scripts/` is copied for the type checker, which the
 # API container does not need at runtime but keeps the image self-contained.

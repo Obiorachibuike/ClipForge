@@ -6,7 +6,9 @@ the same validated upload/probe pipeline as a browser upload.
 """
 from __future__ import annotations
 
+import ipaddress
 import mimetypes
+import socket
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -67,9 +69,45 @@ def validate_remote_video_url(value: str) -> str:
     return urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, ""))
 
 
+def assert_public_host(host: str) -> None:
+    """Refuse hosts that resolve to private, loopback or link-local addresses.
+
+    The platform allowlist already prevents arbitrary hosts, but DNS is data
+    supplied by an external party: a hostname that resolves inside the
+    deployment's network must never be fetched. Every resolved address is
+    checked (not just the first), and the check happens immediately before the
+    downloader runs.
+    """
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise MediaError(
+            "That video host could not be resolved. Check the URL and try again.",
+            code="video_host_unresolvable",
+        ) from exc
+    addresses = {info[4][0] for info in infos if info[4]}
+    if not addresses:
+        raise MediaError(
+            "That video host could not be resolved. Check the URL and try again.",
+            code="video_host_unresolvable",
+        )
+    for raw in addresses:
+        try:
+            address = ipaddress.ip_address(raw.split("%", 1)[0])
+        except ValueError:
+            continue
+        if not address.is_global or address.is_multicast:
+            log.warning("remote_video.blocked_address", host=host, address=raw)
+            raise MediaError(
+                "That video URL points to an address this deployment will not fetch.",
+                code="blocked_video_host",
+            )
+
+
 def run_import(db: Session, job: Job) -> dict:
     """Download one public video, store it, then queue the normal probe job."""
     source_url = validate_remote_video_url(str(job.payload.get("url") or ""))
+    assert_public_host(urlsplit(source_url).hostname or "")
     user = db.get(User, job.user_id) if job.user_id else None
     project = db.get(Project, job.project_id) if job.project_id else None
     if user is None or project is None or project.user_id != user.id:
@@ -93,6 +131,12 @@ def run_import(db: Session, job: Job) -> dict:
             if event.get("status") != "downloading":
                 return
             downloaded = float(event.get("downloaded_bytes") or 0)
+            # Stop the transfer itself, rather than downloading an unbounded
+            # file and only checking its size afterwards.
+            if downloaded > settings.media_max_upload_bytes:
+                raise MediaError(
+                    "That video is larger than this deployment allows.", code="video_too_large"
+                )
             total = float(event.get("total_bytes") or event.get("total_bytes_estimate") or 0)
             progress = 8 + (downloaded / total * 62 if total > 0 else 4)
             JobService.report_progress(
@@ -103,8 +147,20 @@ def run_import(db: Session, job: Job) -> dict:
                 message="Downloading source video",
             )
 
+        rejection: dict[str, str] = {}
+
+        def duration_filter(info: dict, *, incomplete: bool = False) -> str | None:
+            if incomplete:
+                return None
+            duration = info.get("duration")
+            if duration and float(duration) > settings.media_max_duration_seconds:
+                rejection["reason"] = "video_too_long"
+                return f"Video exceeds the {settings.media_max_duration_seconds}-second limit"
+            return None
+
         options = {
             "outtmpl": output_template,
+            "match_filter": duration_filter,
             "format": "bv*+ba/b",
             "merge_output_format": "mp4",
             "noplaylist": True,
@@ -122,7 +178,13 @@ def run_import(db: Session, job: Job) -> dict:
         try:
             with yt_dlp.YoutubeDL(options) as downloader:
                 info = downloader.extract_info(source_url, download=True)
+        except MediaError:
+            raise
         except DownloadError as exc:
+            if rejection.get("reason") == "video_too_long":
+                raise MediaError(
+                    "That video is longer than this deployment allows.", code="video_too_long"
+                ) from exc
             log.warning("remote_video.download_failed", host=urlsplit(source_url).hostname, error=str(exc)[:500])
             raise MediaError(
                 "The platform could not provide that video. Check that it is public and the URL is correct.",

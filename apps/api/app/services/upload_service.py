@@ -87,6 +87,45 @@ def validate_upload(filename: str, content_type: str, size_bytes: int) -> str:
     return name
 
 
+# Headers that are conclusively *not* media. Unknown layouts still fall back to
+# the extension (see `looks_like_media`), but a PDF or an HTML error page
+# renamed to .mp4 must not be accepted as a video.
+NON_MEDIA_SIGNATURES: tuple[bytes, ...] = (
+    b"%PDF",
+    b"PK\x03\x04",  # zip/docx
+    b"\x89PNG",
+    b"\xff\xd8\xff",  # jpeg
+    b"GIF87a",
+    b"GIF89a",
+    b"<?xml",
+    b"<!DOCTYPE",
+    b"<html",
+    b"<!doctype",
+)
+
+
+def definitely_not_media(first_bytes: bytes) -> bool:
+    """True only when the header rules media out.
+
+    Deliberately conservative: unknown headers return False so unusual but valid
+    containers are not rejected on a guess.
+    """
+    if not first_bytes:
+        return False
+    head = first_bytes[:64].lstrip()
+    lowered = head.lower()
+    if any(lowered.startswith(signature.lower()) for signature in NON_MEDIA_SIGNATURES):
+        return True
+    if lowered.startswith((b"{\"", b"{\n", b"[\n")) or lowered.startswith(b"[{"):
+        return True
+    # Plain text (e.g. an SRT renamed to .mp4): printable ASCII with no binary
+    # NUL bytes and no media signature is not a container.
+    sample = head[:48]
+    if sample and all(32 <= byte < 127 or byte in (9, 10, 13) for byte in sample):
+        return not looks_like_media(sample, "")
+    return False
+
+
 def looks_like_media(first_bytes: bytes, filename: str) -> bool:
     """Check container magic bytes. Unknown layouts are accepted based on the
     extension only when the header is inconclusive (e.g. fragmented streams)."""
@@ -271,6 +310,12 @@ class UploadService:
         if written < settings.media_min_upload_bytes:
             path.unlink(missing_ok=True)
             raise ValidationError("That file is too small to be a video.", field="file")
+        if head and definitely_not_media(head):
+            path.unlink(missing_ok=True)
+            raise ValidationError(
+                "That file does not look like a video. Upload an MP4, MOV, WebM or similar file.",
+                field="file",
+            )
         if head and not looks_like_media(head, session.filename):
             log.warning("upload.unrecognised_container", upload_id=upload_id, mode="stream", head=head[:16])
 
@@ -305,6 +350,18 @@ class UploadService:
             },
         )
         return session
+
+    @staticmethod
+    def expected_chunk_bytes(db: Session, user: User, upload_id: str, index: int) -> int:
+        """Exact byte count a chunk must contain.
+
+        Exposed so the HTTP layer can refuse an oversized body *before* reading
+        it into memory, rather than buffering the request and validating after.
+        """
+        session = UploadService._session(db, user, upload_id)
+        if index < 0 or index >= session.total_chunks:
+            raise ValidationError(f"Chunk index {index} is out of range.", field="index")
+        return min(session.chunk_size, session.size_bytes - index * session.chunk_size)
 
     @staticmethod
     def status(db: Session, user: User, upload_id: str) -> UploadSession:
@@ -403,6 +460,11 @@ class UploadService:
             head = storage.read_bytes(upload_part_key(session, 0), byte_range=RangeSpec(0, min(63, actual_size - 1)))
         except Exception:
             head = b""
+        if head and definitely_not_media(head):
+            raise ValidationError(
+                "That file does not look like a video. Upload an MP4, MOV, WebM or similar file.",
+                field="file",
+            )
         if head and not looks_like_media(head, session.filename):
             log.warning("upload.unrecognised_container", upload_id=upload_id, head=head[:16])
 

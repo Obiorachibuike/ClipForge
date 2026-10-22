@@ -262,6 +262,19 @@ def run_ffmpeg(
         proc.kill()
         raise MediaError("Media processing timed out.", code="ffmpeg_timeout")
     finally:
+        # Any escape from the read loop (cancellation raised by a progress
+        # callback, an interrupted worker, ...) must stop the encoder. Without
+        # this the child kept rendering into a workspace that was being cleaned.
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+        except Exception:  # pragma: no cover - best effort process cleanup
+            pass
         try:
             if proc.stdout:
                 proc.stdout.close()

@@ -1,7 +1,7 @@
 """Application bootstrap without worker-only media requirements."""
 from __future__ import annotations
 
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_settings
 from app.core.db import get_session_factory, init_engine_if_needed
 from app.core.logging import get_logger
 from app.services.caption_service import CaptionService
@@ -93,6 +93,10 @@ def verify_environment() -> dict:
 
 
 def bootstrap(seed: bool = True) -> dict:
+    # Raises in production when a placeholder secret is still configured: signing
+    # sessions with a public value is not a recoverable runtime condition.
+    for warning in validate_runtime_settings():
+        log.warning("bootstrap.insecure_configuration", detail=warning)
     prepare_directories()
     if seed:
         seed_system_data()

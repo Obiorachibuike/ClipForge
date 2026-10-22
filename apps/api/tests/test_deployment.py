@@ -252,3 +252,18 @@ def test_every_dockerfile_copy_source_exists_in_its_build_context():
             if not target.exists():
                 problems.append(f"{name}: {dockerfile.name}:{line} copies '{source}' which does not exist")
     assert not problems, "\n".join(problems)
+
+
+def test_api_image_contains_the_migration_environment():
+    """Alembic must ship in the image that runs migrations.
+
+    Shipping only `app/` made `alembic upgrade head` impossible in the deployed
+    container, which is exactly when it is needed.
+    """
+    dockerfile = (REPO_ROOT / "infrastructure/Dockerfile.api").read_text()
+    assert "apps/api/alembic.ini" in dockerfile
+    assert "apps/api/alembic " in dockerfile or "apps/api/alembic\n" in dockerfile
+    assert (REPO_ROOT / "apps/api/alembic.ini").exists()
+    assert (REPO_ROOT / "apps/api/alembic" / "env.py").exists()
+    versions = list((REPO_ROOT / "apps/api/alembic" / "versions").glob("*.py"))
+    assert versions, "no migration revisions were generated"
