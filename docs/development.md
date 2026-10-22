@@ -62,11 +62,28 @@ python scripts/seed.py --user --asset demo/creator_masterclass.mp4 \
     --narration-script demo/narration.txt --process
 ```
 
+## Database migrations
+
+`DATABASE_URL` drives Alembic, so the same variable used by the app selects the
+target database:
+
+```bash
+cd apps/api
+DATABASE_URL="sqlite:///$PWD/dev.db" alembic upgrade head
+DATABASE_URL="..." alembic current     # head revision
+DATABASE_URL="..." alembic check       # model/migration drift
+```
+
+`AUTO_CREATE_TABLES=true` remains the quick-start default; the migration test
+suite (`apps/api/tests/test_migrations.py`) proves a freshly migrated database
+matches the ORM metadata exactly, upgrades idempotently and downgrades cleanly.
+
 ## Tests
 
 ```bash
-# Backend
+# Backend — 195 tests (the real-media pipeline test needs FFmpeg)
 ./.venv/bin/python -m pytest apps/api/tests -q
+./.venv/bin/python -m pytest apps/api/tests -q -m "not integration"   # fast unit/API subset
 
 # Frontend
 cd apps/web && npm test

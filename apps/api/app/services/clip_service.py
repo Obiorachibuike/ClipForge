@@ -1,6 +1,7 @@
 """Clip creation, boundary snapping and edit-state management."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from app.core.config import settings
@@ -75,6 +76,13 @@ class ClipService:
         video = db.get(Video, candidate.video_id)
         if video is None:
             raise NotFoundError("The source video for this moment is missing.", code="video_not_found")
+        if video.project_id != candidate.project_id:
+            # A candidate must never point at another project's source video.
+            raise NotFoundError("The source video for this moment is missing.", code="video_not_found")
+
+        candidate_start, candidate_end = ClipService._validated_range(
+            video, candidate.start_time, candidate.end_time
+        )
 
         _width, _height, ratio = resolve_dimensions(preset, aspect_ratio or video.aspect_ratio)
 
@@ -104,9 +112,9 @@ class ClipService:
                 "margin_v": 140,
             },
             headline_variants=list((candidate.meta or {}).get("headline_variants") or []),
-            start_time=float(candidate.start_time),
-            end_time=float(candidate.end_time),
-            duration=float(candidate.duration),
+            start_time=candidate_start,
+            end_time=candidate_end,
+            duration=round(candidate_end - candidate_start, 3),
             aspect_ratio=ratio,
             crop=crop,
             background=ClipService.default_background(),
@@ -187,24 +195,48 @@ class ClipService:
 
     # ------------------------------------------------------------- boundary ---
     @staticmethod
-    def snap_and_validate(db: Session, video: Video, start: float, end: float) -> tuple[float, float]:
-        """Snap cut points to sentence boundaries, natural pauses and speaker
-        changes so clips never start mid-word."""
-        if end <= start:
+    def _validated_range(video: Video, start: Any, end: Any) -> tuple[float, float]:
+        """Validate a clip interval against the original source timeline.
+
+        Rejects negative, non-finite, reversed or out-of-range timestamps, and
+        enforces the deployment's duration limits. Every value stored on a clip
+        passes through here (candidate conversion, manual creation, edits).
+        """
+        try:
+            start_f, end_f = float(start), float(end)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Clip start and end must be numbers.", field="start_time") from exc
+        if not math.isfinite(start_f) or not math.isfinite(end_f):
+            raise ValidationError("Clip start and end must be finite numbers.", field="start_time")
+        if start_f < 0:
+            raise ValidationError("The clip start cannot be negative.", field="start_time")
+        limit = float(video.duration_seconds or 0.0)
+        if limit > 0:
+            if start_f >= limit:
+                raise ValidationError(
+                    "The clip start is beyond the end of the video.", field="start_time"
+                )
+            end_f = min(end_f, limit)
+        if end_f <= start_f:
             raise ValidationError("The clip end must come after its start.", field="end_time")
-        if video.duration_seconds and start > video.duration_seconds:
-            raise ValidationError("The clip start is beyond the end of the video.", field="start_time")
-        limit = video.duration_seconds or end
-        end = min(end, limit)
-        duration = end - start
+        duration = end_f - start_f
         if duration < MIN_CLIP_DURATION:
             raise ValidationError(
                 f"Clips must be at least {MIN_CLIP_DURATION:.0f} seconds long.", field="duration"
             )
         if duration > MAX_CLIP_DURATION:
             raise ValidationError(
-                f"Clips cannot exceed {MAX_CLIP_DURATION:.0f} seconds on this deployment.", field="duration"
+                f"Clips cannot exceed {MAX_CLIP_DURATION:.0f} seconds on this deployment.",
+                field="duration",
             )
+        return round(start_f, 3), round(end_f, 3)
+
+    @staticmethod
+    def snap_and_validate(db: Session, video: Video, start: float, end: float) -> tuple[float, float]:
+        """Snap cut points to sentence boundaries, natural pauses and speaker
+        changes so clips never start mid-word."""
+        start, end = ClipService._validated_range(video, start, end)
+        limit = float(video.duration_seconds or end)
 
         transcript = db.execute(
             select(Transcript)
@@ -228,7 +260,13 @@ class ClipService:
         if words:
             start = _snap_start(words, start)
             end = _snap_end(words, end)
-        return round(start, 3), round(min(end, limit), 3)
+        # Snapping is bounded by the tolerance window, but still re-check the
+        # hard invariants so a boundary can never become negative or reversed.
+        start = max(0.0, float(start))
+        end = min(float(end), limit)
+        if end <= start:
+            raise ValidationError("The clip end must come after its start.", field="end_time")
+        return round(start, 3), round(end, 3)
 
     # ---------------------------------------------------------------- reads ---
     @staticmethod
@@ -285,8 +323,9 @@ class ClipService:
         end = float(payload.get("end_time", clip.end_time))
         if "start_time" in payload or "end_time" in payload:
             video = db.get(Video, clip.video_id)
-            if video is not None:
-                start, end = ClipService.snap_and_validate(db, video, start, end)
+            if video is None:
+                raise NotFoundError("The source video for this clip is missing.", code="video_not_found")
+            start, end = ClipService.snap_and_validate(db, video, start, end)
             clip.start_time, clip.end_time = start, end
             clip.duration = round(end - start, 3)
 

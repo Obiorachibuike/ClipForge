@@ -1,104 +1,102 @@
-"""Alembic is the production schema-management path; it must match the models.
+"""Migration process tests.
 
-These tests run the real Alembic commands against temporary SQLite databases.
-PostgreSQL cannot be started in this sandbox, so the PostgreSQL-specific path is
-covered statically (the migration uses SQLAlchemy constructs, and the URL is
-resolved from DATABASE_URL at run time) — see the implementation report.
+These run Alembic against a throwaway SQLite database exactly the way a
+deployment would (`alembic upgrade head`), then assert the migrated schema is
+identical to the ORM metadata and that the downgrade is available.
 """
 from __future__ import annotations
 
+import os
+import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
-import pytest
-from alembic.config import Config
-from app.models import Base
-from sqlalchemy import create_engine, inspect
-
-from alembic import command
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ALEMBIC_INI = REPO_ROOT / "alembic.ini"
-HEAD_REVISION = "0001_initial_schema"
+API_ROOT = REPO_ROOT / "apps" / "api"
+ALEMBIC = Path(sys.executable).with_name("alembic")
 
 
-def _config(url: str) -> Config:
-    config = Config(str(ALEMBIC_INI))
-    config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
-    config.set_main_option("sqlalchemy.url", url)
-    return config
-
-
-@pytest.fixture()
-def migrated_database(tmp_path):
-    url = f"sqlite:///{tmp_path / 'migrated.db'}"
-    command.upgrade(_config(url), "head")
-    return url
-
-
-def test_upgrade_head_creates_the_complete_schema(migrated_database):
-    engine = create_engine(migrated_database)
-    inspector = inspect(engine)
-    tables = set(inspector.get_table_names()) - {"alembic_version"}
-
-    assert tables == set(Base.metadata.tables)
-    for table in Base.metadata.tables.values():
-        db_columns = {column["name"] for column in inspector.get_columns(table.name)}
-        model_columns = {column.name for column in table.columns}
-        assert db_columns == model_columns, f"{table.name} columns drifted from the migration"
-        db_indexes = {index["name"] for index in inspector.get_indexes(table.name)}
-        model_indexes = {index.name for index in table.indexes}
-        assert model_indexes <= db_indexes, f"{table.name} is missing indexes {model_indexes - db_indexes}"
-
-
-def test_foreign_keys_and_cascade_rules_match_the_models(migrated_database):
-    inspector = inspect(create_engine(migrated_database))
-
-    jobs = {
-        tuple(fk["constrained_columns"]): (fk["referred_table"], fk["options"].get("ondelete"))
-        for fk in inspector.get_foreign_keys("jobs")
+def _alembic(database_url: str, *args: str) -> subprocess.CompletedProcess:
+    env = {
+        **os.environ,
+        "DATABASE_URL": database_url,
+        "ENVIRONMENT": "test",
+        # Keep the CLI independent of any developer .env values.
+        "AUTO_CREATE_TABLES": "false",
     }
-    assert jobs[("project_id",)] == ("projects", "CASCADE")
-    assert jobs[("user_id",)] == ("users", "CASCADE")
-    assert jobs[("video_id",)] == ("videos", "SET NULL")
+    assert ALEMBIC.exists(), f"alembic console script not found at {ALEMBIC}"
+    return subprocess.run(
+        [str(ALEMBIC), "-c", "alembic.ini", *args],
+        cwd=API_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
-    # Every model FK exists in the migrated schema with the same target.
-    for table in Base.metadata.tables.values():
-        migrated = {
-            (tuple(fk["constrained_columns"]), fk["referred_table"])
-            for fk in inspector.get_foreign_keys(table.name)
+
+def _tables(path: Path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        for column in table.columns:
-            for fk in column.foreign_keys:
-                assert ((column.name,), fk.column.table.name) in migrated
+    finally:
+        connection.close()
 
 
-def test_revision_is_recorded_in_alembic_version(migrated_database):
-    engine = create_engine(migrated_database)
-    with engine.connect() as connection:
-        from sqlalchemy import text
+def test_migrations_create_the_full_schema_and_downgrade_cleanly(tmp_path):
+    sys.path.insert(0, str(API_ROOT))
+    from app.models import Base
 
-        version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == HEAD_REVISION
+    database = tmp_path / "migrated.db"
+    url = f"sqlite:///{database}"
+
+    upgraded = _alembic(url, "upgrade", "head")
+    assert upgraded.returncode == 0, upgraded.stderr[-3000:]
+
+    migrated = _tables(database) - {"alembic_version"}
+    expected = set(Base.metadata.tables)
+    assert migrated == expected, {
+        "missing": sorted(expected - migrated),
+        "unexpected": sorted(migrated - expected),
+    }
+
+    # Running the same upgrade again is a no-op, not an error.
+    again = _alembic(url, "upgrade", "head")
+    assert again.returncode == 0, again.stderr[-2000:]
+
+    # The schema matches the models exactly (no drift awaiting a new revision).
+    check = _alembic(url, "check")
+    assert check.returncode == 0, check.stdout + check.stderr[-2000:]
+
+    downgraded = _alembic(url, "downgrade", "base")
+    assert downgraded.returncode == 0, downgraded.stderr[-3000:]
+    assert _tables(database) - {"alembic_version"} == set()
 
 
-def test_migrations_are_idempotent(migrated_database):
-    # A second upgrade must be a no-op rather than re-running create_table.
-    command.upgrade(_config(migrated_database), "head")
-    inspector = inspect(create_engine(migrated_database))
-    assert set(Base.metadata.tables) <= set(inspector.get_table_names())
+def test_a_fresh_database_can_be_migrated_then_served(tmp_path):
+    """A database created only by migrations must satisfy the application."""
+    sys.path.insert(0, str(API_ROOT))
+    from app.models import Base
 
+    database = tmp_path / "fresh.db"
+    url = f"sqlite:///{database}"
+    result = _alembic(url, "upgrade", "head")
+    assert result.returncode == 0, result.stderr[-3000:]
 
-def test_the_migration_matches_the_models_without_pending_changes(migrated_database):
-    """`alembic check` is how CI catches a model change with no migration."""
-    command.check(_config(migrated_database))
-
-
-def test_downgrade_base_removes_the_application_schema(tmp_path):
-    url = f"sqlite:///{tmp_path / 'rollback.db'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-    command.downgrade(config, "base")
-
-    inspector = inspect(create_engine(url))
-    remaining = set(inspector.get_table_names()) - {"alembic_version"}
-    assert remaining == set(), f"downgrade left tables behind: {sorted(remaining)}"
+    # Spot-check a few tables and columns that the pipeline depends on.
+    connection = sqlite3.connect(database)
+    try:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(transcript_words)")
+        }
+        assert {"transcript_id", "start_time", "end_time", "word", "confidence"} <= columns
+        job_columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+        assert {"status", "payload", "attempts", "run_after", "cancel_requested"} <= job_columns
+    finally:
+        connection.close()
+    assert "transcript_words" in Base.metadata.tables

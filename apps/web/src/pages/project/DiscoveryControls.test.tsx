@@ -26,12 +26,12 @@ describe('DiscoveryControls', () => {
     const start = onStart();
     renderWithProviders(<DiscoveryControls onStart={start} />);
 
-    const minimum = screen.getByLabelText('Minimum clip duration');
+    const maximum = screen.getByLabelText('Maximum clip duration');
     // jsdom does not implement selection/clearing for `type=number`, so drive
     // the same change event a browser emits when the value is replaced.
-    fireEvent.change(minimum, { target: { value: '120' } });
+    fireEvent.change(maximum, { target: { value: '5' } });
 
-    expect(screen.getByText(/minimum length must be shorter/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot be longer than the maximum/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /find clips/i })).toBeDisabled();
     expect(start).not.toHaveBeenCalled();
   });
@@ -40,21 +40,27 @@ describe('DiscoveryControls', () => {
     renderWithProviders(<DiscoveryControls onStart={onStart()} />);
     const count = screen.getByLabelText('Number of clips');
     fireEvent.change(count, { target: { value: '100' } });
-    expect(screen.getByText(/at most 30 clips/i)).toBeInTheDocument();
+    expect(screen.getByText(/at most 40 clips/i)).toBeInTheDocument();
   });
 
   it('clamps values to the server bounds before calling onStart', () => {
     expect(clampDiscovery({ max_candidates: 999, min_duration: 1, max_duration: 900 })).toEqual({
-      max_candidates: 30,
-      min_duration: 3,
-      max_duration: 300,
+      max_candidates: 40,
+      min_duration: 5,
+      max_duration: 180,
     });
-    // The API caps the *minimum* clip length at 180s separately from the 300s
+    // The API caps the *minimum* clip length at 120s separately from the 180s
     // maximum length; the client must not submit a value the server rejects.
     expect(clampDiscovery({ max_candidates: 12, min_duration: 240, max_duration: 300 })).toEqual({
       max_candidates: 12,
-      min_duration: 180,
-      max_duration: 300,
+      min_duration: 120,
+      max_duration: 180,
+    });
+    // The maximum is never clamped below the minimum, so the pair stays valid.
+    expect(clampDiscovery({ max_candidates: 12, min_duration: 120, max_duration: 30 })).toEqual({
+      max_candidates: 12,
+      min_duration: 120,
+      max_duration: 120,
     });
   });
 

@@ -43,12 +43,12 @@ MAX_LLM_MOMENTS = 14
 DEFAULT_MAX_CANDIDATES = 12
 DEFAULT_MIN_DURATION = 10.0
 DEFAULT_MAX_DURATION = 95.0
-# Hard limits enforced in the worker, independent of API validation, so a
-# hand-written or retried job payload cannot turn discovery into an unbounded
-# O(n^2) search or emit clips outside the product's duration bounds.
-HARD_MAX_CANDIDATES = 30
-HARD_MIN_DURATION = 3.0
-HARD_MAX_DURATION = 300.0
+# Hard ceilings applied inside the job as well as at the HTTP boundary: a job
+# payload is durable state, so it must be safe even if it was written by an older
+# or buggy caller.
+MAX_CANDIDATES_LIMIT = 40
+DURATION_FLOOR = 5.0
+DURATION_CEILING = 180.0
 
 
 def run(db: Session, job: Job) -> dict:
@@ -61,6 +61,10 @@ def run(db: Session, job: Job) -> dict:
     video = db.get(Video, video_id) if video_id else _primary_video(db, project.id)
     if video is None:
         raise NotFoundError("Upload a video to this project before discovering clips.", code="video_not_found")
+    if video.project_id != project.id:
+        # Never analyze media that belongs to a different project/account, even
+        # if a malformed job payload names it.
+        raise NotFoundError("That video does not belong to this project.", code="video_not_found")
 
     transcript = _primary_transcript(db, video.id)
     if transcript is None or transcript.status != TranscriptStatus.COMPLETED.value:
@@ -210,7 +214,12 @@ def run(db: Session, job: Job) -> dict:
 
 # ------------------------------------------------------------------ helpers ---
 def _bounded_number(value, default: float, *, low: float, high: float) -> float:
-    """Parse a payload number, falling back to `default` and clamping to bounds."""
+    """Parse a payload number, falling back to `default` and clamping to bounds.
+
+    A payload is durable state, so it may contain anything an older or buggy
+    caller wrote. Non-numeric and non-finite values (`nan`, `inf`) fall back to
+    the documented default instead of escaping the ceiling.
+    """
     if value is None or value == "":
         return default
     try:
@@ -225,24 +234,16 @@ def _bounded_number(value, default: float, *, low: float, high: float) -> float:
 def discovery_options(payload: dict) -> tuple[int, float, float]:
     """Return (max_candidates, min_duration, max_duration), always in bounds."""
     max_candidates = int(
-        _bounded_number(
-            payload.get("max_candidates"), DEFAULT_MAX_CANDIDATES, low=1, high=HARD_MAX_CANDIDATES
-        )
+        _bounded_number(payload.get("max_candidates"), DEFAULT_MAX_CANDIDATES, low=1, high=MAX_CANDIDATES_LIMIT)
     )
     min_duration = _bounded_number(
-        payload.get("min_duration"), DEFAULT_MIN_DURATION, low=HARD_MIN_DURATION, high=HARD_MAX_DURATION
+        payload.get("min_duration"), DEFAULT_MIN_DURATION, low=DURATION_FLOOR, high=DURATION_CEILING
     )
     max_duration = _bounded_number(
-        payload.get("max_duration"), DEFAULT_MAX_DURATION, low=HARD_MIN_DURATION, high=HARD_MAX_DURATION
+        payload.get("max_duration"), DEFAULT_MAX_DURATION, low=DURATION_FLOOR, high=DURATION_CEILING
     )
-    if max_duration <= min_duration:
-        log.warning(
-            "discovery.invalid_duration_bounds",
-            min_duration=min_duration,
-            max_duration=max_duration,
-            fallback=(DEFAULT_MIN_DURATION, DEFAULT_MAX_DURATION),
-        )
-        min_duration, max_duration = DEFAULT_MIN_DURATION, DEFAULT_MAX_DURATION
+    if max_duration < min_duration:
+        max_duration = min_duration
     return max_candidates, min_duration, max_duration
 
 

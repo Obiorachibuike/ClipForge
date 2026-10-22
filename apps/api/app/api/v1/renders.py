@@ -306,7 +306,11 @@ def download_export(
     if export is None or export.user_id != user.id or export.deleted_at is not None:
         raise NotFoundError("Export not found.", code="export_not_found")
     storage = get_storage()
-    info = storage.stat(export.storage_key)
+    try:
+        info = storage.stat(export.storage_key)
+    except (FileNotFoundError, StorageError) as exc:
+        log.warning("export.file_missing", export_id=export.id, key=export.storage_key, error=str(exc))
+        raise NotFoundError("The exported file is no longer available.", code="export_file_missing") from exc
     byte_range: RangeSpec | None = None
     if range_header and range_header.startswith("bytes="):
         try:

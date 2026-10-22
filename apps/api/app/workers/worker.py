@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_settings
 from app.core.db import get_session_factory, init_engine_if_needed
 from app.core.errors import AppError, CancelledError_
 from app.core.logging import configure_logging, get_logger
@@ -40,6 +40,7 @@ class Worker:
         self._running_lock = threading.Lock()
         self._heartbeat_thread: threading.Thread | None = None
         self._last_reconcile = 0.0
+        self._claim_backoff = 0.5
         self.queue = get_queue()
 
     # ------------------------------------------------------------- control ---
@@ -80,7 +81,20 @@ class Worker:
             if capacity <= 0:
                 time.sleep(0.1)
                 continue
-            job_id = self.queue.claim(self.worker_id, timeout=min(1.0, settings.worker_poll_interval + 0.2))
+            try:
+                job_id = self.queue.claim(
+                    self.worker_id, timeout=min(1.0, settings.worker_poll_interval + 0.2)
+                )
+            except Exception as exc:
+                # A transient Redis/database outage must not terminate the
+                # worker process and strand every queued job. Back off, keep the
+                # loop alive, and resume claiming when the dependency returns.
+                delay = self._claim_backoff
+                self._claim_backoff = min(30.0, max(0.5, self._claim_backoff * 2))
+                log.warning("worker.claim_failed", error=str(exc)[:200], retry_in=round(delay, 1))
+                self._stop.wait(delay)
+                continue
+            self._claim_backoff = 0.5
             if job_id is None:
                 continue
             with self._running_lock:
@@ -112,7 +126,12 @@ class Worker:
             db.close()
             with self._running_lock:
                 self._running.discard(job_id)
-            self.queue.ack(job_id)
+            try:
+                self.queue.ack(job_id)
+            except Exception as exc:  # pragma: no cover - Redis outage on ack
+                # The durable job row is already terminal; a failed ack leaves a
+                # stale active entry that recover_stale/recover_unqueued repairs.
+                log.warning("worker.ack_failed", job_id=job_id, error=str(exc)[:200])
             registry.clear(job_id)
 
     def _execute(self, db: Session, job: Job) -> None:
@@ -210,6 +229,8 @@ class Worker:
 
 
 def run_worker(concurrency: int | None = None) -> None:
+    for warning in validate_runtime_settings():
+        log.warning("worker.insecure_configuration", detail=warning)
     init_engine_if_needed()
     worker = Worker(concurrency=concurrency)
     worker.install_signal_handlers()
@@ -223,6 +244,8 @@ def main() -> None:  # pragma: no cover - process entry point
     parser.add_argument("--concurrency", type=int, default=None)
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
+    for warning in validate_runtime_settings():
+        log.warning("worker.insecure_configuration", detail=warning)
     init_engine_if_needed()
     worker = Worker(concurrency=args.concurrency, name=args.name)
     worker.install_signal_handlers()

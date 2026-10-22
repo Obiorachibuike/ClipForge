@@ -9,11 +9,17 @@ from app.models import (
     CaptionStyle,
     Clip,
     Transcript,
+    TranscriptSegment,
     TranscriptStatus,
     TranscriptWord,
     User,
 )
-from app.services.media.ass import CAPTION_PRESETS, CaptionConfig, caption_cues
+from app.services.media.ass import (
+    CAPTION_PRESETS,
+    CaptionConfig,
+    CaptionWord,
+    caption_cues,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -103,50 +109,109 @@ class CaptionService:
 
     # ---------------------------------------------------------------- data ---
     @staticmethod
-    def words_for_clip(db: Session, clip: Clip) -> tuple[list[dict[str, Any]], bool]:
-        """Clip-relative words from the transcript, with user edits applied."""
-        transcript = db.execute(
+    def current_transcript(db: Session, video_id: str) -> Transcript | None:
+        return db.execute(
             select(Transcript)
-            .where(Transcript.video_id == clip.video_id, Transcript.status == TranscriptStatus.COMPLETED.value)
+            .where(Transcript.video_id == video_id, Transcript.status == TranscriptStatus.COMPLETED.value)
             .order_by(Transcript.created_at.desc())
         ).scalars().first()
+
+    @staticmethod
+    def caption_words_for_clip(db: Session, clip: Clip) -> tuple[list[dict[str, Any]], bool, bool]:
+        """Clip-relative caption timing from the transcript.
+
+        Returns ``(words, has_word_timings, transcript_available)``. When the
+        transcript has measured word timings those are used (re-based onto the
+        clip). When the provider only produced segment timings, one honest cue
+        per segment is returned instead: interpolating word positions would
+        present invented timing as if it had been measured.
+        """
+        transcript = CaptionService.current_transcript(db, clip.video_id)
         if transcript is None:
-            return [], False
-        rows = list(
-            db.execute(
-                select(TranscriptWord)
-                .where(
-                    TranscriptWord.transcript_id == transcript.id,
-                    TranscriptWord.end_time >= clip.start_time,
-                    TranscriptWord.start_time <= clip.end_time,
-                )
-                .order_by(TranscriptWord.start_time)
-            ).scalars()
-        )
+            return [], False, False
         edits = (clip.caption_overrides or {}).get("words") or {}
-        words: list[dict[str, Any]] = []
-        for index, row in enumerate(rows):
-            start = max(0.0, row.start_time - clip.start_time)
-            end = max(start + 0.05, min(row.end_time, clip.end_time) - clip.start_time)
-            text = edits.get(str(index), row.word)
-            words.append(
-                {
-                    "index": index,
-                    "word_id": row.id,
-                    "word": str(text),
-                    "start": round(start, 3),
-                    "end": round(end, 3),
-                    "speaker": row.speaker or "",
-                    "confidence": row.confidence,
-                    "is_edited": str(index) in edits,
-                }
+        has_word_timings = bool((transcript.meta or {}).get("has_word_timings"))
+
+        if has_word_timings:
+            rows = list(
+                db.execute(
+                    select(TranscriptWord)
+                    .where(
+                        TranscriptWord.transcript_id == transcript.id,
+                        TranscriptWord.end_time >= clip.start_time,
+                        TranscriptWord.start_time <= clip.end_time,
+                    )
+                    .order_by(TranscriptWord.start_time)
+                ).scalars()
             )
+            words: list[dict[str, Any]] = []
+            for index, row in enumerate(rows):
+                if row.start_time >= clip.end_time:
+                    # The query is inclusive; a word beginning exactly at the
+                    # cut belongs to the next clip, not this one.
+                    continue
+                start = max(0.0, row.start_time - clip.start_time)
+                end = max(start + 0.05, min(row.end_time, clip.end_time) - clip.start_time)
+                text = edits.get(str(index), row.word)
+                words.append(
+                    {
+                        "index": index,
+                        "word_id": row.id,
+                        "word": str(text),
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "speaker": row.speaker or "",
+                        "confidence": row.confidence,
+                        "is_edited": str(index) in edits,
+                    }
+                )
+        else:
+            segments = list(
+                db.execute(
+                    select(TranscriptSegment)
+                    .where(
+                        TranscriptSegment.transcript_id == transcript.id,
+                        TranscriptSegment.end_time >= clip.start_time,
+                        TranscriptSegment.start_time <= clip.end_time,
+                    )
+                    .order_by(TranscriptSegment.start_time)
+                ).scalars()
+            )
+            words = []
+            for index, segment in enumerate(segments):
+                if segment.start_time >= clip.end_time:
+                    continue
+                start = max(0.0, segment.start_time - clip.start_time)
+                end = max(start + 0.05, min(segment.end_time, clip.end_time) - clip.start_time)
+                text = str(edits.get(str(index), segment.text) or "").strip()
+                if not text:
+                    continue
+                words.append(
+                    {
+                        "index": index,
+                        "word_id": "",
+                        "word": text,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "speaker": segment.speaker or "",
+                        "confidence": segment.avg_confidence or 0.0,
+                        "is_edited": str(index) in edits,
+                    }
+                )
+
+        # Guarantee monotonic, non-overlapping cue timing.
         for previous, current in zip(words, words[1:]):
             if current["start"] < previous["end"]:
                 midpoint = round((previous["start"] + current["end"]) / 2.0, 3)
                 previous["end"] = midpoint
                 current["start"] = midpoint
-        return words, True
+        return words, has_word_timings, True
+
+    @staticmethod
+    def words_for_clip(db: Session, clip: Clip) -> tuple[list[dict[str, Any]], bool]:
+        """Clip-relative caption words, with user edits applied."""
+        words, _has_word_timings, transcript_available = CaptionService.caption_words_for_clip(db, clip)
+        return words, transcript_available
 
     @staticmethod
     def apply_word_edits(clip: Clip, edits: dict[str, str] | None) -> dict[str, Any]:
@@ -173,8 +238,6 @@ class CaptionService:
 
     @staticmethod
     def build_cues(words: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
-        from app.services.media.ass import CaptionWord
-
         caption_words = [
             CaptionWord(
                 text=word["word"],

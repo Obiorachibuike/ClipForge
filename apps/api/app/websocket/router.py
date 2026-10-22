@@ -43,6 +43,53 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 
 log = get_logger(__name__)
+
+
+def _normalise_origin(origin: str) -> str:
+    return origin.strip().rstrip("/").lower()
+
+
+def origin_allowed(origin: str | None, host: str) -> bool:
+    """Validate a WebSocket Origin.
+
+    An `endswith` comparison is not an origin check: with
+    `https://example.com` configured it also accepted
+    `https://evil-example.com`. Only a scheme+host exact match against the
+    configured origins (or the opt-in `CORS_ORIGIN_REGEX`), or a match against
+    the Host header the upgrade arrived on, is a grant. Requests without an
+    Origin header are native clients, not browsers, and keep working — auth is
+    still required.
+    """
+    if not origin:
+        return True
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    # An Origin is a scheme + authority. Anything with a path, query, fragment
+    # or embedded credentials is not a browser origin and is refused.
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        return False
+    if parsed.username or parsed.password:
+        return False
+
+    candidate = _normalise_origin(f"{parsed.scheme}://{parsed.netloc}")
+    if host and candidate == _normalise_origin(f"{parsed.scheme}://{host}"):
+        return True
+    allowed = {_normalise_origin(value) for value in settings.cors_origin_list if value}
+    if candidate in allowed:
+        return True
+    if settings.cors_origin_regex:
+        try:
+            return re.fullmatch(settings.cors_origin_regex, origin) is not None
+        except re.error:  # pragma: no cover - configuration error
+            log.warning("ws.invalid_cors_origin_regex")
+            return False
+    return False
+
+
 router = APIRouter()
 
 
@@ -99,46 +146,6 @@ def _owned_job_ids(user_id: str, job_ids: set[str]) -> set[str]:
         db.close()
 
 
-def _normalise_origin(origin: str) -> str:
-    return origin.strip().rstrip("/").lower()
-
-
-def _origin_allowed(origin: str | None, host: str | None) -> bool:
-    """Validate a WebSocket Origin.
-
-    Exact match against the configured origins (or the configured regex) is the
-    only cross-origin grant. Same-origin is also allowed, determined by the Host
-    header the request actually arrived on — a value an attacker cannot set for
-    somebody else's socket. Suffix matches are deliberately not used: an origin
-    such as `https://evil-example.com` must not pass because it ends with a
-    configured hostname.
-    """
-    if not origin:
-        return True  # non-browser clients do not send Origin; auth is still required
-    try:
-        parsed = urlsplit(origin)
-    except ValueError:
-        return False
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return False
-    if parsed.path not in ("", "/") or parsed.query or parsed.fragment or parsed.username or parsed.password:
-        return False
-
-    candidate = _normalise_origin(f"{parsed.scheme}://{parsed.netloc}")
-    if host and candidate == _normalise_origin(f"{parsed.scheme}://{host}"):
-        return True
-    allowed = {_normalise_origin(value) for value in settings.cors_origin_list if value}
-    if candidate in allowed:
-        return True
-    if settings.cors_origin_regex:
-        try:
-            return re.fullmatch(settings.cors_origin_regex, origin) is not None
-        except re.error:  # pragma: no cover - configuration error
-            log.warning("ws.invalid_cors_origin_regex")
-            return False
-    return False
-
-
 def _snapshot(user_id: str, project_id: str | None) -> list[dict]:
     db = get_session_factory()()
     try:
@@ -154,7 +161,7 @@ async def events_socket(
     project_id: str | None = Query(default=None),
 ) -> None:
     origin = websocket.headers.get("origin")
-    if not _origin_allowed(origin, websocket.headers.get("host")):
+    if not origin_allowed(origin, websocket.headers.get("host", "")):
         # Browser origins must be explicitly configured (CORS_ORIGINS /
         # CORS_ORIGIN_REGEX) or match the host the request arrived on.
         log.info("ws.origin_rejected", origin=origin or "")

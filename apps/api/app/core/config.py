@@ -18,7 +18,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DEV_SECRET = "dev-only-insecure-secret-change-me"
-MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -209,49 +208,6 @@ class Settings(BaseSettings):
         """Vercel functions must never host the long-running media worker."""
         return os.getenv("VERCEL", "").strip().lower() in {"1", "true", "yes"}
 
-    def production_config_errors(self) -> list[str]:
-        """Reasons this process must refuse to start in production.
-
-        A known development secret means anyone can forge a session cookie for
-        any account, so production fails closed instead of logging a warning.
-        """
-        if not self.is_production:
-            return []
-        errors: list[str] = []
-        secret = (self.secret_key or "").strip()
-        jwt_secret = (self.jwt_secret or "").strip()
-        if not secret or secret == DEFAULT_DEV_SECRET:
-            errors.append("SECRET_KEY must be set to a random value in production.")
-        elif len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
-            errors.append(
-                f"SECRET_KEY must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters in production."
-            )
-        if not jwt_secret or jwt_secret == DEFAULT_DEV_SECRET:
-            errors.append("JWT_SECRET must be set to a random value in production.")
-        elif len(jwt_secret) < MIN_PRODUCTION_SECRET_LENGTH:
-            errors.append(
-                f"JWT_SECRET must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters in production."
-            )
-        return errors
-
-    def production_config_warnings(self) -> list[str]:
-        """Production settings that are dangerous but not startup-fatal."""
-        if not self.is_production:
-            return []
-        warnings: list[str] = []
-        if not self.cookie_secure:
-            warnings.append("COOKIE_SECURE is false: session cookies can travel over plain HTTP.")
-        if not (self.encryption_key or "").strip():
-            warnings.append(
-                "ENCRYPTION_KEY is empty: provider API keys are encrypted with a key derived "
-                "from SECRET_KEY. Set a dedicated ENCRYPTION_KEY."
-            )
-        if self.queue_backend == "memory":
-            warnings.append("QUEUE_BACKEND=memory is refused at queue creation time in production.")
-        if self.storage_backend == "local" and self.worker_external:
-            warnings.append("External workers cannot see local storage; use STORAGE_BACKEND=s3.")
-        return warnings
-
     def duration_within_limit(self, seconds: float) -> bool:
         limit = int(self.media_max_duration_seconds or 0)
         if limit <= 0:
@@ -341,6 +297,57 @@ def _resolve_binary(explicit: str, name: str) -> str:
             pass
     found = shutil.which(name)
     return found or ""
+
+
+_KNOWN_INSECURE_SECRETS = {
+    "",
+    "dev-only-insecure-secret-change-me",
+    "change-me",
+    "changeme",
+    "secret",
+    "test-secret",
+}
+
+
+def validate_runtime_settings(cfg: Settings | None = None) -> list[str]:
+    """Fail closed on unsafe production configuration.
+
+    Production must never sign sessions or derive the provider-key encryption
+    key from a value that is published in this repository. Non-fatal weaknesses
+    are returned so the bootstrap can log them explicitly.
+
+    Called at API and worker startup (not at import time) so tests, migrations
+    and CLIs can still construct settings.
+    """
+    cfg = cfg or settings
+    if not cfg.is_production:
+        return []
+
+    problems: list[str] = []
+    for name, value in (("SECRET_KEY", cfg.secret_key), ("JWT_SECRET", cfg.jwt_secret)):
+        if value.strip().lower() in _KNOWN_INSECURE_SECRETS or len(value.strip()) < 32:
+            problems.append(f"{name} must be a random value of at least 32 characters")
+    if problems:
+        raise RuntimeError(
+            "Insecure production configuration: "
+            + "; ".join(problems)
+            + '. Generate values with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+
+    warnings: list[str] = []
+    if not cfg.cookie_secure:
+        warnings.append("COOKIE_SECURE is false: session cookies can travel over plain HTTP")
+    if cfg.auto_create_tables:
+        warnings.append(
+            "AUTO_CREATE_TABLES is true: run `alembic upgrade head` and set AUTO_CREATE_TABLES=false"
+        )
+    if cfg.storage_backend == "local":
+        warnings.append(
+            "STORAGE_BACKEND=local is not durable across hosts; use S3-compatible storage"
+        )
+    if not cfg.cors_origins.strip():
+        warnings.append("CORS_ORIGINS is empty: the browser app will not be able to call the API")
+    return warnings
 
 
 @lru_cache

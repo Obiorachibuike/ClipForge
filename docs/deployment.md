@@ -200,50 +200,58 @@ an object lifecycle rule as a backstop for abandoned uploads.
 
 ## Database migrations
 
-The repository now contains an initialized Alembic environment and a baseline
-revision (`alembic/versions/0001_initial_schema.py`) generated from the
-SQLAlchemy models. `AUTO_CREATE_TABLES=true` remains the single-box development
-default; production should manage the schema with Alembic.
-
-**Fresh database**
+The Alembic environment lives in `apps/api/alembic/` and reads `DATABASE_URL`
+from the same environment as the API and worker. The initial revision
+(`7627644971dd`) creates the complete schema; `alembic check` reports no drift
+between the migrations and the ORM models.
 
 ```bash
-export DATABASE_URL=postgresql+psycopg://user:pass@host:5432/clipforge
-alembic upgrade head
-export AUTO_CREATE_TABLES=false
+cd apps/api
+DATABASE_URL='postgresql+psycopg://user:pass@host:5432/clipforge' alembic upgrade head
+DATABASE_URL='...' alembic current      # 7627644971dd (head)
+DATABASE_URL='...' alembic check        # no new upgrade operations detected
 ```
 
-**Existing database created by `AUTO_CREATE_TABLES`**
-
-The schema already matches the baseline, so stamp it instead of re-running the
-`CREATE TABLE` statements:
+The API/worker image contains `alembic.ini` and the migration directory, so a
+deployment can run them from the same image without installing anything:
 
 ```bash
-alembic stamp 0001_initial_schema
-export AUTO_CREATE_TABLES=false
+docker run --rm --env-file /path/to/worker.env clipforge-worker \
+    sh -c 'cd /srv/app/apps/api && alembic upgrade head'
 ```
 
-`alembic stamp` writes only the `alembic_version` row; it does not touch media or
-metadata. Take a normal database backup first — every schema change should have a
-recovery path.
+### Fresh database
 
-**Routine operations**
+1. Provision PostgreSQL.
+2. Run `alembic upgrade head` (above).
+3. Set `AUTO_CREATE_TABLES=false` and start the API and workers.
 
-- `alembic current` — revision applied to the configured database.
-- `alembic upgrade head` — run as a deployment step *before* new API/worker
-  replicas start.
-- `alembic check` — fails if models and migrations have drifted (run in CI with
-  a disposable PostgreSQL database).
-- `alembic revision --autogenerate -m "..."` — review the generated file before
-  committing. Autogenerate can emit `Text()` without the `sa.` prefix for JSONB
-  variants and can order `CREATE TABLE` statements incorrectly for some
-  constraints; the baseline was corrected by hand and checked against the models
-  by `apps/api/tests/test_migrations.py`.
+### Existing database created by `AUTO_CREATE_TABLES`
 
-The URL is read from `DATABASE_URL` (or `-x url=...`); credentials never belong
-in `alembic.ini`. SQLite uses batch mode so future ALTERs work in development.
-The Docker image copies `alembic.ini` and `alembic/`, so the same image can run
-the upgrade step as a one-shot container command.
+Those tables were created from the same metadata the baseline migration
+describes. Stamp the database instead of re-running the DDL:
+
+```bash
+DATABASE_URL='...' alembic stamp 7627644971dd
+```
+
+Then set `AUTO_CREATE_TABLES=false`. Verify with `alembic check` — it must report
+no pending operations. Recovery: take a PostgreSQL snapshot before stamping;
+`alembic downgrade base` is destructive and is only for throwaway databases.
+
+`AUTO_CREATE_TABLES=true` remains the development/Compose default. Production
+logs a warning when it is still enabled, and the production secret check below
+runs at every API and worker start.
+
+Migrations are run from `apps/api` (that is where `alembic.ini` lives). The URL
+is read from `DATABASE_URL`; credentials never belong in `alembic.ini`. SQLite
+uses batch mode so future `ALTER`s work in development.
+
+`alembic revision --autogenerate -m "..."` output still needs review:
+autogenerate can emit `Text()` without the `sa.` prefix for JSONB variants and
+can order `CREATE TABLE` statements incorrectly for some constraints. The
+baseline was corrected by hand and is checked against the models by
+`apps/api/tests/test_migrations.py`.
 
 ## Health and observability
 
@@ -260,6 +268,20 @@ not prove a separate worker is running or that Vercel's bundle is under its
 limit. Monitor worker process health and queue age/depth separately. Logs are
 structured (`LOG_JSON=true`), and each HTTP response carries an `X-Request-ID`.
 
+## Fail-closed production configuration
+
+`validate_runtime_settings()` runs at API and worker startup. In
+`ENVIRONMENT=production` it **refuses to start** when `SECRET_KEY` or
+`JWT_SECRET` is missing, shorter than 32 characters, or still the documented
+development placeholder — sessions and provider-key encryption must never be
+derived from a public value. It logs (but does not fail on) `COOKIE_SECURE=false`,
+`AUTO_CREATE_TABLES=true` and `STORAGE_BACKEND=local`.
+
+Upload chunks are read with a hard byte ceiling derived from the upload session,
+so an oversized chunk is rejected with `413` before it is buffered. Source
+duration is capped by `MEDIA_MAX_DURATION_SECONDS` after probing (uploads and URL
+imports alike), and URL imports also enforce the byte cap during download.
+
 ## Production checklist
 
 - [ ] `SECRET_KEY`, `JWT_SECRET`, `ENCRYPTION_KEY` are random secrets, not in the
@@ -274,7 +296,9 @@ structured (`LOG_JSON=true`), and each HTTP response carries an `X-Request-ID`.
       the external worker rather than the lightweight function runtime.
 - [ ] Redis persistence/availability and a worker queue-age alert are configured.
 - [ ] Object storage has lifecycle/retention policy for abandoned upload parts.
-- [ ] `AUTO_CREATE_TABLES=false` only after migrations are initialized and run.
+- [ ] `alembic upgrade head` ran against the production database (or an existing
+      auto-created database was stamped) and `AUTO_CREATE_TABLES=false`.
+- [ ] Startup succeeds, proving the placeholder-secret guard passes.
 - [ ] `RATE_LIMIT_ENABLED=true` and limits are tuned to real traffic.
 - [ ] Provider credentials and upload limits match the product's policy.
 - [ ] Vercel's actual function bundle size and production deployment are verified.
@@ -292,10 +316,11 @@ structured (`LOG_JSON=true`), and each HTTP response carries an `X-Request-ID`.
   configuration is covered by static deployment tests, but Docker images,
   external worker connectivity, Redis/S3 behavior and production services need a
   real deployment smoke test.
-- **Migrations have been verified on SQLite in this sandbox, not on a live
-  PostgreSQL server.** The migration uses portable SQLAlchemy constructs and the
-  env.py resolves `DATABASE_URL`, but run `alembic upgrade head` against a real
-  PostgreSQL instance (and `alembic check`) before relying on it in production.
+- **PostgreSQL has not been exercised in this environment.** The baseline
+  migration, `alembic check`, upgrade and downgrade were verified against SQLite;
+  the CI/container environment that has PostgreSQL should run
+  `alembic upgrade head` against a real instance before the first production
+  deployment.
 - **The browser E2E suite requires a separately installed Playwright browser**
   and has not been run in this change unless stated in the implementation report.
 

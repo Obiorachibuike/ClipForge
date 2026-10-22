@@ -175,16 +175,6 @@ def test_nginx_keeps_the_spa_fallback_and_websocket_upgrade():
     assert "proxy_set_header Upgrade    $http_upgrade;" in config
 
 
-def test_api_image_can_run_the_migrations_it_deploys():
-    dockerfile = (REPO_ROOT / "infrastructure" / "Dockerfile.api").read_text()
-    assert "COPY alembic.ini /srv/app/alembic.ini" in dockerfile
-    assert "COPY alembic /srv/app/alembic" in dockerfile
-    assert (REPO_ROOT / "alembic.ini").is_file()
-    versions = sorted((REPO_ROOT / "alembic" / "versions").glob("*.py"))
-    assert versions, "no Alembic revisions are committed"
-    assert "alembic" in (REPO_ROOT / "apps" / "api" / "requirements.txt").read_text().lower()
-
-
 def test_api_image_installs_media_tooling_the_pipeline_requires():
     dockerfile = (REPO_ROOT / "infrastructure" / "Dockerfile.api").read_text()
     # FFmpeg is the pipeline; the fonts are required for burned-in captions.
@@ -260,3 +250,23 @@ def test_every_dockerfile_copy_source_exists_in_its_build_context():
             if not target.exists():
                 problems.append(f"{name}: {dockerfile.name}:{line} copies '{source}' which does not exist")
     assert not problems, "\n".join(problems)
+
+
+def test_api_image_contains_the_migration_environment():
+    """Alembic must ship in the image that runs migrations.
+
+    Shipping only `app/` made `alembic upgrade head` impossible in the deployed
+    container, which is exactly when it is needed.
+    """
+    dockerfile = (REPO_ROOT / "infrastructure/Dockerfile.api").read_text()
+    assert "COPY apps/api/alembic.ini /srv/app/apps/api/alembic.ini" in dockerfile
+    assert "COPY apps/api/alembic /srv/app/apps/api/alembic" in dockerfile
+    # The root-level copies must stay gone: those paths no longer exist and a
+    # dangling COPY fails the image build.
+    assert "COPY alembic.ini /srv/app/alembic.ini" not in dockerfile
+    assert (REPO_ROOT / "apps/api/alembic.ini").exists()
+    assert (REPO_ROOT / "apps/api/alembic" / "env.py").exists()
+    versions = list((REPO_ROOT / "apps/api/alembic" / "versions").glob("*.py"))
+    assert versions, "no migration revisions were generated"
+    requirements = (REPO_ROOT / "apps/api" / "requirements.txt").read_text().lower()
+    assert "alembic" in requirements, "the image cannot migrate without the package"

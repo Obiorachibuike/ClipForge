@@ -7,16 +7,15 @@ import { cn } from '@/lib/format';
  *
  * The backend validates and re-clamps these values; the client enforces the
  * same bounds so a typo produces a clear message instead of a rejected job.
- * Defaults match `DiscoverRequest` on the server.
+ * Defaults match `DiscoverClipsRequest` on the server, and the bounds mirror
+ * its Pydantic field constraints exactly so the form cannot submit a 422.
  */
 export const DISCOVERY_LIMITS = {
-  maxCandidates: 30,
-  minDuration: 3,
-  // Server-side `DiscoverRequest` caps the *minimum* at 180s even though the
-  // maximum clip length may be 300s. Mirroring that here avoids a 422 for a
-  // value the client would otherwise consider valid.
-  minDurationMax: 180,
-  maxDuration: 300,
+  maxCandidates: 40,
+  minCandidates: 1,
+  minDuration: 5,
+  minDurationMax: 120,
+  maxDuration: 180,
 } as const;
 
 export interface DiscoveryOptions {
@@ -38,7 +37,7 @@ function toNumber(value: string, fallback: number): number {
 
 export function clampDiscovery(options: DiscoveryOptions): DiscoveryOptions {
   const maxCandidates = Math.max(
-    1,
+    DISCOVERY_LIMITS.minCandidates,
     Math.min(DISCOVERY_LIMITS.maxCandidates, Math.round(options.max_candidates)),
   );
   const minDuration = Math.max(
@@ -46,7 +45,7 @@ export function clampDiscovery(options: DiscoveryOptions): DiscoveryOptions {
     Math.min(DISCOVERY_LIMITS.minDurationMax, options.min_duration),
   );
   const maxDuration = Math.max(
-    DISCOVERY_LIMITS.minDuration,
+    Math.max(DISCOVERY_LIMITS.minDuration, minDuration),
     Math.min(DISCOVERY_LIMITS.maxDuration, options.max_duration),
   );
   return {
@@ -57,7 +56,7 @@ export function clampDiscovery(options: DiscoveryOptions): DiscoveryOptions {
 }
 
 export function discoveryError(options: DiscoveryOptions): string | null {
-  if (!Number.isFinite(options.max_candidates) || options.max_candidates < 1) {
+  if (!Number.isFinite(options.max_candidates) || options.max_candidates < DISCOVERY_LIMITS.minCandidates) {
     return 'Choose at least one clip.';
   }
   if (options.max_candidates > DISCOVERY_LIMITS.maxCandidates) {
@@ -72,8 +71,8 @@ export function discoveryError(options: DiscoveryOptions): string | null {
   if (!Number.isFinite(options.max_duration) || options.max_duration > DISCOVERY_LIMITS.maxDuration) {
     return `Clips cannot exceed ${DISCOVERY_LIMITS.maxDuration} seconds.`;
   }
-  if (options.min_duration >= options.max_duration) {
-    return 'The minimum length must be shorter than the maximum.';
+  if (options.min_duration > options.max_duration) {
+    return 'The minimum length cannot be longer than the maximum.';
   }
   return null;
 }

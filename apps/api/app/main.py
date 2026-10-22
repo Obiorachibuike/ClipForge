@@ -9,6 +9,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+from app.api.deps import CurrentUser
 from app.api.v1 import (
     account,
     auth,
@@ -26,6 +27,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import check_rate_limit
 from app.services import events as ev
 from app.services.bootstrap import bootstrap
+from app.websocket.router import create_ticket, events_socket
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -244,9 +246,6 @@ app.include_router(transcripts.router, prefix=API)
 app.include_router(clips.router, prefix=API)
 app.include_router(renders.router, prefix=API)
 app.include_router(jobs.router, prefix=API)
-
-from app.api.deps import CurrentUser
-from app.websocket.router import create_ticket, events_socket
 
 
 def _ws_ticket(user: CurrentUser) -> dict:

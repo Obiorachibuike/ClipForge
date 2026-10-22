@@ -16,8 +16,6 @@ from pathlib import Path
 
 from app.core.errors import StorageError, ValidationError
 
-_UNSAFE_KEY = re.compile(r"(^/)|(\\),|(\.\.)|(^[a-zA-Z]:)", re.IGNORECASE)
-
 
 def validate_key(key: str) -> str:
     """Reject traversal and absolute paths in storage keys."""

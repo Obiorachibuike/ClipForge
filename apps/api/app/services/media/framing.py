@@ -484,20 +484,37 @@ def crop_expression(
     clip_start: float,
     source_width: int,
     source_height: int,
+    clip_end: float | None = None,
 ) -> tuple[int, int, str, str]:
     """Build (width, height, x_expr, y_expr) for FFmpeg's `crop` filter.
 
     The expressions are piecewise-linear in `t` (clip-relative seconds), so the
     window pans smoothly between keyframes instead of jumping.
+
+    Only keyframes inside the clip are emitted. The previous version started at
+    `clip_start` and ran to the end of the *source*, so a 40 s clip of a 4 h
+    video embedded thousands of nested `if()`s the encoder could never reach.
     """
     if not keyframes:
         return source_width // 2, source_height, "0", "0"
-    kf = [k for k in keyframes if k["time"] >= clip_start - 0.001] or list(keyframes)
+    ordered = sorted(keyframes, key=lambda k: float(k["time"]))
+    upper = float(clip_end) if clip_end is not None else float("inf")
+    kf = [k for k in ordered if clip_start - 0.001 <= float(k["time"]) <= upper + 0.001]
+    if not kf:
+        # No sampled frame inside the window: hold the last known framing.
+        before = [k for k in ordered if float(k["time"]) <= clip_start]
+        kf = [before[-1]] if before else [ordered[0]]
     times = [max(0.0, float(k["time"]) - clip_start) for k in kf]
     width = int(round(float(kf[0]["width"])))
     height = int(round(float(kf[0]["height"])))
     xs = [max(0.0, float(k["center_x"]) - width / 2.0) for k in kf]
     ys = [max(0.0, float(k["center_y"]) - height / 2.0) for k in kf]
+    if times and times[0] > 0.5:
+        # Anchor the clip's opening seconds so the first interval is held rather
+        # than extrapolated backwards from the first sampled frame.
+        times.insert(0, 0.0)
+        xs.insert(0, xs[0])
+        ys.insert(0, ys[0])
     # Clamp inside the source frame
     xs = [min(x, max(0.0, source_width - width)) for x in xs]
     ys = [min(y, max(0.0, source_height - height)) for y in ys]

@@ -298,3 +298,26 @@ def test_websocket_origin_regex_is_opt_in(auth_api, monkeypatch):
 
     monkeypatch.setattr(settings, "cors_origin_regex", r"https://.*\.e2b\.app")
     assert _first_frame_with_origin(auth_api, origin)["type"] == "system.ready"
+
+def test_websocket_origin_is_compared_exactly_not_by_suffix():
+    """`endswith` accepted `https://evil-example.com` for `https://example.com`."""
+    from app.websocket.router import origin_allowed
+
+    assert origin_allowed("http://localhost:5173", "testserver")  # configured
+    assert origin_allowed("https://app.example.com", "app.example.com")
+    assert origin_allowed(None, "testserver")  # native clients send no Origin
+    assert not origin_allowed("http://evil-localhost:5173", "testserver")
+    assert not origin_allowed("http://localhost:5173.evil.com", "testserver")
+    assert not origin_allowed("ftp://example.com", "testserver")
+    assert not origin_allowed("null", "testserver")
+
+
+def test_websocket_rejects_a_cross_origin_upgrade(client):
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/ws/v1/events", headers={"origin": "https://evil-example.com"}
+        ):
+            pass

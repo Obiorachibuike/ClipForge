@@ -21,7 +21,7 @@ from app.models import (
 )
 from app.schemas.common import OkResponse, Page
 from app.schemas.media import (
-    DiscoverRequest,
+    DiscoverClipsRequest,
     JobOut,
     ProjectCreate,
     ProjectOut,
@@ -143,12 +143,13 @@ def discover_clips(
     project_id: str,
     db: DbSession,
     user: CurrentUser,
-    body: DiscoverRequest | None = None,
+    body: DiscoverClipsRequest | None = None,
 ) -> JobOut:
     """Queue the clip discovery pipeline for this project.
 
-    Clip count and duration bounds are validated here; the worker re-clamps them
-    so a retried or hand-written job payload cannot exceed the same limits.
+    Only the validated discovery settings are taken from the request body. The
+    project/video identifiers are resolved from the owned project, so a client
+    cannot point a job at another account's media.
     """
     project = owned_project(db, user, project_id)
     video = db.execute(
@@ -170,14 +171,8 @@ def discover_clips(
     if any(job.type == JobType.PROJECT_DISCOVER_CLIPS.value for job in active_jobs):
         raise ConflictError("Clip discovery is already running for this project.", code="discovery_running")
 
-    options = body or DiscoverRequest()
-    payload = {
-        "project_id": project.id,
-        "video_id": video.id,
-        "max_candidates": options.max_candidates,
-        "min_duration": options.min_duration,
-        "max_duration": options.max_duration,
-    }
+    discovery_settings = (body or DiscoverClipsRequest()).model_dump()
+    payload = {"project_id": project.id, "video_id": video.id, **discovery_settings}
     project.status = ProjectStatus.PROCESSING.value
     db.commit()
     job = JobService.create(
