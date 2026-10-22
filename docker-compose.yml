@@ -37,6 +37,7 @@ x-api-env: &api-env
   AUTO_CREATE_TABLES: "true"          # production: run `alembic upgrade head` instead
   FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  MEDIA_MAX_DURATION_SECONDS: ${MEDIA_MAX_DURATION_SECONDS:-14400}
   MEDIA_FFMPEG_PATH: /usr/bin/ffmpeg
   MEDIA_FFPROBE_PATH: /usr/bin/ffprobe
   FONT_DIRECTORY: /usr/share/fonts
