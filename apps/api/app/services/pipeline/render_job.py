@@ -18,13 +18,11 @@ from app.models import (
     Project,
     RenderJob,
     RenderStatus,
-    Transcript,
-    TranscriptStatus,
-    TranscriptWord,
     Video,
     VideoAnalysis,
 )
 from app.services import events as ev
+from app.services.caption_service import CaptionService
 from app.services.job_service import JobService
 from app.services.media import ffmpeg
 from app.services.media.ass import CaptionConfig, CaptionWord
@@ -117,8 +115,18 @@ def _render_for_job(db: Session, job: Job) -> RenderJob | None:
 
 def _render(db: Session, job: Job, render: RenderJob, clip: Clip, video: Video, project: Project | None) -> dict:
     storage = get_storage()
-    transcript = _primary_transcript(db, video.id)
-    words = _clip_words(db, transcript, clip) if transcript else []
+    caption_rows, has_word_timings, _transcript_available = CaptionService.caption_words_for_clip(db, clip)
+    words = [
+        CaptionWord(
+            text=row["word"],
+            start=row["start"],
+            end=row["end"],
+            index=row["index"],
+            speaker=row.get("speaker", ""),
+            is_edited=bool(row.get("is_edited")),
+        )
+        for row in caption_rows
+    ]
 
     framing = _framing_keyframes(db, video.id, clip)
     plan = build_plan(
@@ -149,8 +157,13 @@ def _render(db: Session, job: Job, render: RenderJob, clip: Clip, video: Video, 
 
     if not words and bool((clip.caption_config or {}).get("enabled", True)) and not clip.headline:
         plan.warnings.append("captions:none_available")
+    elif words and not has_word_timings:
+        # Honest limitation: the provider returned segment timing only, so the
+        # captions use real segment boundaries rather than invented word times.
+        plan.warnings.append("captions:segment_timing")
 
     render.spec = plan.to_dict()
+    render.spec.setdefault("captions", {})["word_timings"] = bool(has_word_timings)
     render.aspect_ratio = plan.aspect_ratio
     render.width = plan.width
     render.height = plan.height
@@ -209,7 +222,7 @@ def _render(db: Session, job: Job, render: RenderJob, clip: Clip, video: Video, 
             job_id=job.id,
             total_duration=plan.duration,
             progress_cb=on_progress,
-            timeout=None,
+            timeout=render_timeout(plan.duration),
         )
         if not output.exists() or output.stat().st_size == 0:
             raise MediaError("The renderer produced no output.", code="render_empty_output")
@@ -228,6 +241,15 @@ def _render(db: Session, job: Job, render: RenderJob, clip: Clip, video: Video, 
             log.warning("render.thumbnail_failed", render_id=render.id, error=str(exc)[:200])
 
         output_duration = ffmpeg.media_duration(output) or plan.duration
+        if not duration_matches(output_duration, plan.duration):
+            # A clip that is materially shorter/longer than the requested range
+            # means seeking went wrong; never ship it as the user's export.
+            raise MediaError(
+                "The rendered clip does not match the requested time range.",
+                code="render_duration_mismatch",
+                expected=round(plan.duration, 3),
+                actual=round(output_duration, 3),
+            )
         size_bytes = output.stat().st_size
 
         render.storage_key = key
@@ -316,6 +338,32 @@ def _record_export(
     )
 
 
+MIN_RENDER_TIMEOUT = 300.0
+MAX_RENDER_TIMEOUT = 3 * 60 * 60.0
+RENDER_TIMEOUT_FACTOR = 40.0
+
+
+def render_timeout(duration: float) -> float:
+    """A hard ceiling for one encode.
+
+    Rendering is much slower than real time on shared CPUs, so the budget scales
+    with the clip, but a wedged FFmpeg must not occupy a worker forever: without
+    a ceiling it can only be freed by restarting the container.
+    """
+    return max(MIN_RENDER_TIMEOUT, min(MAX_RENDER_TIMEOUT, float(duration) * RENDER_TIMEOUT_FACTOR))
+
+
+def duration_matches(actual: float, expected: float) -> bool:
+    """Is the rendered duration within a sane tolerance of the requested range?
+
+    Container/frame rounding can move the reported duration by a few frames, but
+    a materially different duration indicates a bad seek or a wrong source.
+    """
+    if expected <= 0:
+        return actual > 0
+    return abs(float(actual) - float(expected)) <= max(0.75, float(expected) * 0.03)
+
+
 def _slug(text: str) -> str:
     import re
 
@@ -366,47 +414,6 @@ def _mark_failed(db: Session, render: RenderJob, clip: Clip, job: Job, exc: Base
 
 
 # ------------------------------------------------------------------ helpers ---
-def _primary_transcript(db: Session, video_id: str) -> Transcript | None:
-    return db.execute(
-        select(Transcript)
-        .where(Transcript.video_id == video_id, Transcript.status == TranscriptStatus.COMPLETED.value)
-        .order_by(Transcript.created_at.desc())
-    ).scalars().first()
-
-
-def _clip_words(db: Session, transcript: Transcript | None, clip: Clip) -> list[CaptionWord]:
-    """Transcript words inside the clip window, re-based to clip time."""
-    if transcript is None:
-        return []
-    rows = db.execute(
-        select(TranscriptWord)
-        .where(
-            TranscriptWord.transcript_id == transcript.id,
-            TranscriptWord.end_time >= clip.start_time,
-            TranscriptWord.start_time <= clip.end_time,
-        )
-        .order_by(TranscriptWord.start_time)
-    ).scalars()
-    words: list[CaptionWord] = []
-    for index, row in enumerate(rows):
-        start = max(0.0, row.start_time - clip.start_time)
-        end = max(start + 0.05, min(row.end_time, clip.end_time) - clip.start_time)
-        words.append(
-            CaptionWord(
-                text=row.word,
-                start=round(start, 3),
-                end=round(end, 3),
-                index=index,
-                speaker=row.speaker or "",
-            )
-        )
-    # Guarantee monotonic, non-overlapping cue timing.
-    for previous, current in zip(words, words[1:]):
-        if current.start < previous.end:
-            midpoint = (previous.start + current.end) / 2.0
-            previous.end = round(midpoint, 3)
-            current.start = round(midpoint, 3)
-    return words
 
 
 def _edited_words(clip: Clip) -> dict[int, str]:

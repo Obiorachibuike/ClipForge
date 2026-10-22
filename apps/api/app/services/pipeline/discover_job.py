@@ -43,6 +43,12 @@ log = get_logger(__name__)
 
 MAX_LLM_MOMENTS = 14
 DEFAULT_MAX_CANDIDATES = 12
+# Hard ceilings applied inside the job as well as at the HTTP boundary: a job
+# payload is durable state, so it must be safe even if it was written by an older
+# or buggy caller.
+MAX_CANDIDATES_LIMIT = 40
+DURATION_FLOOR = 5.0
+DURATION_CEILING = 180.0
 
 
 def run(db: Session, job: Job) -> dict:
@@ -55,6 +61,10 @@ def run(db: Session, job: Job) -> dict:
     video = db.get(Video, video_id) if video_id else _primary_video(db, project.id)
     if video is None:
         raise NotFoundError("Upload a video to this project before discovering clips.", code="video_not_found")
+    if video.project_id != project.id:
+        # Never analyze media that belongs to a different project/account, even
+        # if a malformed job payload names it.
+        raise NotFoundError("That video does not belong to this project.", code="video_not_found")
 
     transcript = _primary_transcript(db, video.id)
     if transcript is None or transcript.status != TranscriptStatus.COMPLETED.value:
@@ -62,9 +72,9 @@ def run(db: Session, job: Job) -> dict:
             "Transcribe the video before running clip discovery.", code="transcript_required"
         )
 
-    max_candidates = int(job.payload.get("max_candidates") or DEFAULT_MAX_CANDIDATES)
-    min_duration = float(job.payload.get("min_duration") or 10.0)
-    max_duration = float(job.payload.get("max_duration") or 95.0)
+    max_candidates = max(1, min(int(job.payload.get("max_candidates") or DEFAULT_MAX_CANDIDATES), MAX_CANDIDATES_LIMIT))
+    min_duration = max(DURATION_FLOOR, min(float(job.payload.get("min_duration") or 10.0), DURATION_CEILING))
+    max_duration = max(min_duration, min(float(job.payload.get("max_duration") or 95.0), DURATION_CEILING))
 
     JobService.report_progress(db, job, stage="load", progress=4, message="Loading transcript", force=True)
 
