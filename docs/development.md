@@ -81,7 +81,7 @@ matches the ORM metadata exactly, upgrades idempotently and downgrades cleanly.
 ## Tests
 
 ```bash
-# Backend — 195 tests (the real-media pipeline test needs FFmpeg)
+# Backend — 226 tests (the real-media pipeline test needs FFmpeg)
 ./.venv/bin/python -m pytest apps/api/tests -q
 ./.venv/bin/python -m pytest apps/api/tests -q -m "not integration"   # fast unit/API subset
 
