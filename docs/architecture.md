@@ -49,7 +49,10 @@ Every long operation is a row in `jobs`, never a long-lived HTTP request.
 Properties that follow from this design:
 
 - **Crash recovery.** A worker that dies mid-job leaves a `running` row with a
-  stale heartbeat; `JobService.recover_stale` re-queues it.
+  stale heartbeat; `JobService.recover_stale` re-queues it. Each worker runs the
+  same reconciliation at startup and periodically (`WORKER_RECONCILE_SECONDS`,
+  default 60 s); a live queue heartbeat keeps a genuinely long render safe from
+  being reclaimed by another replica.
 - **Cancellation.** `POST /jobs/{id}/cancel` sets `cancel_requested`; handlers call
   `JobService.check_cancelled` between stages, so work stops promptly without
   killing a process.
@@ -123,7 +126,9 @@ Renders record their exact `spec` so a render is reproducible.
 ## Storage
 
 `StorageBackend` (`base.py`, `local.py`, `s3.py`) is provider-independent: local
-filesystem for development, S3/R2/MinIO for deployments. Resumable upload chunks
+filesystem for development, S3/R2/MinIO for deployments. `storage_backend=auto`
+selects S3 only after a real `HeadBucket` probe succeeds; a failed probe is
+reported instead of silently writing media to an ephemeral local disk. Resumable upload chunks
 are stored as separate objects; the API never requires a shared local filesystem
 with the worker. `/complete` validates the part objects and queues the upload ID.
 The Docker worker assembles them in its own workspace, writes the completed source
@@ -183,6 +188,15 @@ The sidecar is stateless, so it scales horizontally with no coordination.
   and output paths are confined to the job workspace by `safe_output_path`.
 - **Secrets.** Provider keys encrypted at rest; passwords bcrypt-hashed; reset
   tokens stored as fingerprints, single-use and expiring.
+- **SSRF.** URL imports are restricted to known video platforms. Every outbound
+  request (including redirects and CDN URLs discovered by yt-dlp) is checked
+  against a public-IP policy that refuses private, loopback, link-local,
+  multicast, reserved, carrier-grade-NAT and cloud-metadata addresses. DNS is
+  resolved for the initial preflight; failure is a refusal, never a pass.
+- **Resource ceilings.** Sources above `MEDIA_MAX_DURATION_SECONDS` (default
+  4 h) are rejected at probe, and the URL importer asks the extractor to skip
+  them before downloading. Upload sessions expire; analysis frame counts and
+  render presets are bounded.
 - **Rate limits.** Separate buckets for global, authentication and upload
   traffic, keyed by user when known and IP otherwise.
 - **Errors.** Structured `{code, message, details, request_id}` bodies. Stack

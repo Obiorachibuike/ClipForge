@@ -161,6 +161,10 @@ object store:
 | `WORKER_INLINE`, `WORKER_EXTERNAL` | Decide whether this process runs media jobs or delegates to an external worker. |
 | `WORKER_CONCURRENCY`, `RENDER_CONCURRENCY` | Throughput vs. CPU. Rendering is the expensive stage. |
 | `MEDIA_MAX_UPLOAD_BYTES` | Maximum source size accepted by the API. |
+| `MEDIA_MAX_DURATION_SECONDS` | Source-duration ceiling (default 4 h; `0` disables). Long media is rejected at probe, and URL imports are skipped before download. |
+| `UPLOAD_SESSION_TTL_MINUTES` | How long an unfinished resumable upload can still receive chunks; expired sessions return 409 `upload_expired`. |
+| `WORKER_RECONCILE_SECONDS` | Startup and periodic stale-job reconciliation interval (default 60 s; `0` disables the periodic pass). |
+| `CORS_ORIGIN_REGEX` | Optional exact-pattern allowlist for preview/ephemeral origins. Never use a suffix match. |
 | `PROCESSOR_ENABLED`, `PROCESSOR_URL` | Optional Rust acceleration; not the worker queue or media store. |
 
 ## Scaling
@@ -196,19 +200,50 @@ an object lifecycle rule as a backstop for abandoned uploads.
 
 ## Database migrations
 
-`AUTO_CREATE_TABLES=true` creates tables on startup, convenient for a single box
-and used by Compose by default. For a real deployment:
+The repository now contains an initialized Alembic environment and a baseline
+revision (`alembic/versions/0001_initial_schema.py`) generated from the
+SQLAlchemy models. `AUTO_CREATE_TABLES=true` remains the single-box development
+default; production should manage the schema with Alembic.
 
-1. Generate a baseline: `alembic revision --autogenerate -m "initial"` with
-   `DATABASE_URL` pointed at the target database (`alembic` is retained for the
-   migration command).
-2. Set `AUTO_CREATE_TABLES=false`.
-3. Run `alembic upgrade head` as a deployment step before starting new workers
-   and API functions.
+**Fresh database**
 
-There is no initialized `alembic/` directory in this repository yet, so a
-production migration pipeline still needs that baseline before disabling
-`AUTO_CREATE_TABLES`.
+```bash
+export DATABASE_URL=postgresql+psycopg://user:pass@host:5432/clipforge
+alembic upgrade head
+export AUTO_CREATE_TABLES=false
+```
+
+**Existing database created by `AUTO_CREATE_TABLES`**
+
+The schema already matches the baseline, so stamp it instead of re-running the
+`CREATE TABLE` statements:
+
+```bash
+alembic stamp 0001_initial_schema
+export AUTO_CREATE_TABLES=false
+```
+
+`alembic stamp` writes only the `alembic_version` row; it does not touch media or
+metadata. Take a normal database backup first — every schema change should have a
+recovery path.
+
+**Routine operations**
+
+- `alembic current` — revision applied to the configured database.
+- `alembic upgrade head` — run as a deployment step *before* new API/worker
+  replicas start.
+- `alembic check` — fails if models and migrations have drifted (run in CI with
+  a disposable PostgreSQL database).
+- `alembic revision --autogenerate -m "..."` — review the generated file before
+  committing. Autogenerate can emit `Text()` without the `sa.` prefix for JSONB
+  variants and can order `CREATE TABLE` statements incorrectly for some
+  constraints; the baseline was corrected by hand and checked against the models
+  by `apps/api/tests/test_migrations.py`.
+
+The URL is read from `DATABASE_URL` (or `-x url=...`); credentials never belong
+in `alembic.ini`. SQLite uses batch mode so future ALTERs work in development.
+The Docker image copies `alembic.ini` and `alembic/`, so the same image can run
+the upgrade step as a one-shot container command.
 
 ## Health and observability
 
@@ -257,8 +292,10 @@ structured (`LOG_JSON=true`), and each HTTP response carries an `X-Request-ID`.
   configuration is covered by static deployment tests, but Docker images,
   external worker connectivity, Redis/S3 behavior and production services need a
   real deployment smoke test.
-- **The Alembic environment has not been initialized.** Do not disable table
-  creation until a baseline and migration process exist.
+- **Migrations have been verified on SQLite in this sandbox, not on a live
+  PostgreSQL server.** The migration uses portable SQLAlchemy constructs and the
+  env.py resolves `DATABASE_URL`, but run `alembic upgrade head` against a real
+  PostgreSQL instance (and `alembic check`) before relying on it in production.
 - **The browser E2E suite requires a separately installed Playwright browser**
   and has not been run in this change unless stated in the implementation report.
 

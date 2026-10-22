@@ -90,6 +90,11 @@ active jobs, and an aggregate `progress` + `stage`, so a dashboard needs one
 request per project.
 
 ### Videos and uploads `/uploads`, `/videos`
+
+`POST /projects/{id}/videos/import-url` accepts a public YouTube/TikTok/Facebook/
+Instagram/Vimeo/Dailymotion/Twitch/X URL. Only those hosts are accepted, and the
+worker's downloader refuses private, loopback, link-local and cloud-metadata
+addresses (including redirect hops) before every request.
 ```
 POST /uploads/init        → upload_id, chunk_size, total_chunks, received_chunks
 PUT  /uploads/{id}/chunk/{index}     raw bytes, 256 KiB – 4 MiB per chunk
@@ -99,7 +104,7 @@ DELETE /uploads/{id}                 → cancel and discard
 ```
 `POST /projects/{id}/videos` accepts a single multipart file up to the negotiated
 4 MiB chunk size; larger files use the resumable endpoints.
-`GET /videos/{id}/stream` is range-enabled; `POST /videos/{id}/signed-url`
+`GET /videos/{id}/stream` is range-enabled; `GET /videos/{id}/signed-url`
 returns a time-limited storage URL. Each chunk is persisted as an object under
 the session's storage prefix; `/complete` validates the parts and queues the
 probe job without assembling a full source inside the API function. The worker
@@ -108,31 +113,32 @@ through shared storage. Chunk uploads are idempotent by index, so a retry after
 a dropped connection is always safe.
 
 ### Transcripts `/projects/{id}/transcript`, `/transcripts/{id}`
-`POST /videos/{id}/transcribe` (optional `{ script }` for alignment),
+`POST /videos/{id}/transcribe` (optional `{ "language": "en" }`),
 `GET /transcripts/{id}` (with segments and words), `GET .../words`,
 `GET .../window?start&end`, `GET .../search?q`, `POST .../retranscribe`,
 `PATCH` word text edits (which never move timings).
 
 ### Candidates `/projects/{id}/candidates`, `/candidates/{id}`
-`POST /projects/{id}/discover` creates a discovery job; `GET /candidates/{id}/score`
+`POST /projects/{id}/discover` creates a discovery job. The optional body sets
+`max_candidates` (1–30), `min_duration` (3–180 s) and `max_duration` (5–300 s);
+the minimum must be below the maximum. `GET /candidates/{id}/score`
 explains the score per signal; `POST /candidates/{id}/clip` turns a candidate into
 a clip; `POST /projects/{id}/candidates/bulk` applies keep/reject decisions.
 
 ### Clips `/projects/{id}/clips`, `/clips/{id}`
-Create from a candidate or manually, `PATCH` trim/crop/style, `POST /{id}/duplicate`,
-`POST /{id}/keep`, `POST /{id}/reject`, `PATCH /{id}/crop` for a manual crop.
+Create from a candidate or manually, `PATCH` trim/style, `POST /{id}/duplicate`,
+`POST /{id}/keep`, `POST /{id}/reject`, `POST /{id}/crop` for a manual crop.
 `GET /clips/{id}` returns the clip with its video, source candidate and latest
 render.
 
 ### Captions `/clips/{id}/captions`
-`GET` returns cues for the player, `PATCH` updates style and text overrides,
-`POST /clips/{id}/captions/regenerate` rebuilds from the transcript.
-`GET /caption-presets` lists the seven built-in looks; `GET/POST /caption-styles`
+`GET` returns cues for the player; `PATCH` updates style and text overrides
+without moving timings. `GET /caption-presets` lists the seven built-in looks; `GET/POST /caption-styles`
 manage user styles.
 
 ### Headlines `/clips/{id}/headlines`
-`GET` lists suggestions (LLM or extractive), `POST /generate` with `{ count }`,
-`POST /select` to place one. Nothing is auto-placed: a clip only shows a headline
+`GET` lists suggestions (LLM or extractive), `POST /clips/{id}/headlines` with
+`{ "count": n }` generates more, `POST /select` places one. Nothing is auto-placed: a clip only shows a headline
 after an explicit selection.
 
 ### Renders and exports

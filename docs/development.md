@@ -65,20 +65,48 @@ python scripts/seed.py --user --asset demo/creator_masterclass.mp4 \
 ## Tests
 
 ```bash
-# Backend — 117 tests
+# Backend
 ./.venv/bin/python -m pytest apps/api/tests -q
 
-# Frontend — 105 tests
+# Frontend
 cd apps/web && npm test
 
 # Types and API drift
 cd apps/web && npx tsc --noEmit
+cd apps/web && npm run build            # tsc -b + vite build
 cd apps/web && npm run check:api        # compares types to the live OpenAPI schema
+```
+
+`apps/api/tests/test_real_media_pipeline.py` is marked `integration` and builds a
+real H.264/AAC video from espeak-ng narration, uploads it through the HTTP API,
+runs the worker handlers and asserts the rendered 1080x1920 MP4 with burned-in
+captions. It skips with an explicit reason when FFmpeg or espeak-ng is missing:
+
+```bash
+./.venv/bin/python -m pytest apps/api/tests/test_real_media_pipeline.py -q -m integration
 ```
 
 `scripts/check_api_types.py` imports the FastAPI app, parses
 `apps/web/src/types/api.ts`, and fails if a field is added, renamed or removed on
 either side. It re-execs into `.venv` automatically if FastAPI is not importable.
+
+### Database migrations
+
+```bash
+# Apply the baseline to a fresh database (DATABASE_URL or -x url=...)
+./.venv/bin/alembic upgrade head
+
+# Databases created earlier by AUTO_CREATE_TABLES already match the baseline
+./.venv/bin/alembic stamp 0001_initial_schema   # then set AUTO_CREATE_TABLES=false
+
+# Model/migration drift check (needs a disposable database)
+./.venv/bin/alembic check
+```
+
+`apps/api/tests/test_migrations.py` runs the real commands against a temporary
+SQLite database and compares every table, column, index and foreign-key action
+with `Base.metadata`. Add a new revision for each model change; never edit an
+applied migration.
 
 ### End-to-end (Playwright)
 
