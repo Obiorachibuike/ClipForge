@@ -21,20 +21,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
-
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from urllib.parse import urlsplit
 
 from app.core.config import settings
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.security import decode_session_token, token_fingerprint
-from app.models import Project, Session as SessionModel, User
-from app.services.events import get_event_bus, job_channel, project_channel, user_channel
+from app.models import Job, Project, User
+from app.models import Session as SessionModel
+from app.services.events import (
+    get_event_bus,
+    project_channel,
+    user_channel,
+)
 from app.websocket.manager import manager, resync_snapshot
 from app.websocket.tickets import consume_ticket
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from sqlalchemy import select
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -79,6 +85,60 @@ def _owned_project_ids(user_id: str) -> list[str]:
         db.close()
 
 
+def _owned_job_ids(user_id: str, job_ids: set[str]) -> set[str]:
+    """Return only the requested job ids that belong to `user_id`."""
+    if not job_ids:
+        return set()
+    db = get_session_factory()()
+    try:
+        rows = db.execute(
+            select(Job.id).where(Job.id.in_(sorted(job_ids)), Job.user_id == user_id)
+        ).scalars()
+        return set(rows)
+    finally:
+        db.close()
+
+
+def _normalise_origin(origin: str) -> str:
+    return origin.strip().rstrip("/").lower()
+
+
+def _origin_allowed(origin: str | None, host: str | None) -> bool:
+    """Validate a WebSocket Origin.
+
+    Exact match against the configured origins (or the configured regex) is the
+    only cross-origin grant. Same-origin is also allowed, determined by the Host
+    header the request actually arrived on — a value an attacker cannot set for
+    somebody else's socket. Suffix matches are deliberately not used: an origin
+    such as `https://evil-example.com` must not pass because it ends with a
+    configured hostname.
+    """
+    if not origin:
+        return True  # non-browser clients do not send Origin; auth is still required
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return False
+
+    candidate = _normalise_origin(f"{parsed.scheme}://{parsed.netloc}")
+    if host and candidate == _normalise_origin(f"{parsed.scheme}://{host}"):
+        return True
+    allowed = {_normalise_origin(value) for value in settings.cors_origin_list if value}
+    if candidate in allowed:
+        return True
+    if settings.cors_origin_regex:
+        try:
+            return re.fullmatch(settings.cors_origin_regex, origin) is not None
+        except re.error:  # pragma: no cover - configuration error
+            log.warning("ws.invalid_cors_origin_regex")
+            return False
+    return False
+
+
 def _snapshot(user_id: str, project_id: str | None) -> list[dict]:
     db = get_session_factory()()
     try:
@@ -94,13 +154,12 @@ async def events_socket(
     project_id: str | None = Query(default=None),
 ) -> None:
     origin = websocket.headers.get("origin")
-    if origin and settings.cors_origin_list and origin not in settings.cors_origin_list:
-        # Same-origin previews and custom hosts are permitted via CORS_ORIGINS.
-        allowed = any(origin.endswith(url.split("//")[-1]) for url in settings.cors_origin_list)
-        if not allowed:
-            log.info("ws.origin_rejected", origin=origin)
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
-            return
+    if not _origin_allowed(origin, websocket.headers.get("host")):
+        # Browser origins must be explicitly configured (CORS_ORIGINS /
+        # CORS_ORIGIN_REGEX) or match the host the request arrived on.
+        log.info("ws.origin_rejected", origin=origin or "")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
+        return
 
     identity = _authenticate(websocket, ticket)
     if identity is None:
@@ -114,7 +173,8 @@ async def events_socket(
     user_id, _session_id = identity
     await websocket.accept()
     channels = {user_channel(user_id)}
-    if project_id:
+    if project_id and project_id in _owned_project_ids(user_id):
+        # The query parameter is a subscription: authorise it like one.
         channels.add(project_channel(project_id))
     connection = await manager.register(websocket, user_id, channels)
 
@@ -176,13 +236,20 @@ async def events_socket(
             elif action == "subscribe":
                 requested = {str(c) for c in (message.get("channels") or [])}
                 allowed = {user_channel(user_id)}
-                owned = set(_owned_project_ids(user_id))
+                owned_projects = set(_owned_project_ids(user_id))
+                requested_jobs = {
+                    channel.split(":", 1)[1] for channel in requested if channel.startswith("job:")
+                }
+                owned_jobs = _owned_job_ids(user_id, requested_jobs)
                 for channel in requested:
                     if channel.startswith("project:"):
-                        if channel.split(":", 1)[1] in owned:
+                        if channel.split(":", 1)[1] in owned_projects:
                             allowed.add(channel)
                     elif channel.startswith("job:"):
-                        allowed.add(channel)
+                        # Job events carry the full job payload (result keys
+                        # included), so a job channel is as sensitive as the job.
+                        if channel.split(":", 1)[1] in owned_jobs:
+                            allowed.add(channel)
                 connection.channels |= allowed
                 subscriber.channels |= allowed
                 await manager.send(
@@ -222,7 +289,7 @@ async def events_socket(
         await manager.unregister(connection)
 
 
-def create_ticket(user: "User", ttl_seconds: int = 60) -> dict:
+def create_ticket(user: User, ttl_seconds: int = 60) -> dict:
     """Mint a short-lived, single-use ticket for non-cookie clients.
 
     Registered in `app.main` with the authenticated-user dependency so the

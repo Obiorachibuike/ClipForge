@@ -5,9 +5,6 @@ a page refresh, so job state is never only in the socket.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
-from sqlalchemy import func, select
-
 from app.api.deps import CurrentUser, DbSession, PageParams, owned_job
 from app.core.errors import ConflictError
 from app.core.logging import get_logger
@@ -15,6 +12,8 @@ from app.models import Job, JobStatus
 from app.schemas.common import OkResponse, Page
 from app.schemas.media import JobOut
 from app.services.job_service import JobService
+from fastapi import APIRouter, Query, status
+from sqlalchemy import func, select
 
 log = get_logger(__name__)
 router = APIRouter(tags=["Jobs"])

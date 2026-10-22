@@ -5,17 +5,17 @@ import time
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header, Request
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.errors import AuthError, NotFoundError, PermissionError_, RateLimitedError
+from app.core.errors import AuthError, NotFoundError, PermissionError_
 from app.core.logging import get_logger
 from app.core.rate_limit import check_rate_limit
 from app.core.security import csrf_matches, decode_session_token, token_fingerprint
-from app.models import Clip, Job, Project, RenderJob, Session as SessionModel, User, Video, as_utc
+from app.models import Clip, Job, Project, RenderJob, User, Video, as_utc
+from app.models import Session as SessionModel
+from fastapi import Cookie, Depends, Header, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

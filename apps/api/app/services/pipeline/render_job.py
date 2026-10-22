@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, CancelledError_, MediaError, NotFoundError
 from app.core.logging import get_logger
@@ -27,11 +23,13 @@ from app.models import (
 from app.services import events as ev
 from app.services.job_service import JobService
 from app.services.media import ffmpeg
-from app.services.media.ass import CaptionConfig, CaptionWord
+from app.services.media.ass import CaptionWord
 from app.services.media.render_spec import build_ass, build_ffmpeg_args, build_plan
 from app.services.pipeline.workspace import workspace_for
 from app.services.storage import get_storage
 from app.services.usage_service import UsageService
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -75,7 +73,7 @@ def run(db: Session, job: Job) -> dict:
         _mark_failed(db, render, clip, job, exc)
         raise
     except Exception as exc:  # unexpected: log full detail, expose a safe message
-        log.exception("render.crashed", render_id=render.id)
+        log.exception("render.crashed", render_id=render.id, error=str(exc)[:500])
         _mark_failed(db, render, clip, job, AppError("Rendering failed unexpectedly.", code="render_failed"))
         raise
 
@@ -213,6 +211,33 @@ def _render(db: Session, job: Job, render: RenderJob, clip: Clip, video: Video, 
         )
         if not output.exists() or output.stat().st_size == 0:
             raise MediaError("The renderer produced no output.", code="render_empty_output")
+
+        # Validate what FFmpeg actually wrote instead of trusting the exit code:
+        # a truncated or stream-less file must never be promoted to an export.
+        probe = ffmpeg.probe_media(output)
+        if int(probe.get("width") or 0) != plan.width or int(probe.get("height") or 0) != plan.height:
+            raise MediaError(
+                f"The renderer produced {probe.get('width')}x{probe.get('height')} output "
+                f"instead of {plan.width}x{plan.height}.",
+                code="render_output_invalid",
+            )
+        if plan.audio_mode != "muted" and video.has_audio and not probe.get("has_audio"):
+            raise MediaError(
+                "The rendered clip has no audio track although the source did.",
+                code="render_output_invalid",
+            )
+        rendered_duration = float(probe.get("duration") or 0.0)
+        if rendered_duration <= 0:
+            raise MediaError(
+                "The rendered clip has no measurable duration.",
+                code="render_output_invalid",
+            )
+        if abs(rendered_duration - plan.duration) > max(2.0, plan.duration * 0.05):
+            plan.warnings.append(
+                f"duration:{rendered_duration:.2f}s_vs_planned_{plan.duration:.2f}s"
+            )
+            render.warnings = plan.warnings
+            db.commit()
 
         JobService.report_progress(db, job, stage="upload", progress=92, message="Storing rendered clip")
         key = f"projects/{clip.project_id}/clips/{clip.id}/renders/{render.id}.mp4"

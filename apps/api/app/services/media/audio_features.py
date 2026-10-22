@@ -9,9 +9,10 @@ only used when a provider has not already supplied speaker labels.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from app.core.logging import get_logger
 from app.services.media import ffmpeg
@@ -113,7 +114,6 @@ def extract_features(
         frame_count = 1
 
     # Build the frame matrix once (stride trick keeps this fast for long audio).
-    itemsize = samples.itemsize
     frames = np.lib.stride_tricks.sliding_window_view(samples, frame_length)[::hop_length]
     if frames.shape[0] > frame_count:
         frames = frames[:frame_count]
@@ -252,7 +252,7 @@ def cluster_speakers(
     return turns, speaker_count, diagnostics
 
 
-def _kmeans(data, k: int, iterations: int = 40, seed: int = 42):  # noqa: ANN001, ANN202
+def _kmeans(data, k: int, iterations: int = 40, seed: int = 42):
     import numpy as np
 
     rng = np.random.default_rng(seed)
@@ -288,7 +288,7 @@ def _kmeans(data, k: int, iterations: int = 40, seed: int = 42):  # noqa: ANN001
     return labels, centers_array, inertia
 
 
-def _silhouette(data, labels, *, sample_size: int = 1500, seed: int = 7) -> float:  # noqa: ANN001
+def _silhouette(data, labels, *, sample_size: int = 1500, seed: int = 7) -> float:
     """Mean silhouette coefficient, computed on a subsample (O(n^2) otherwise).
 
     This is what separates "two voices" from "one voice that varied".
@@ -323,7 +323,7 @@ def _silhouette(data, labels, *, sample_size: int = 1500, seed: int = 7) -> floa
     return float(scores.mean())
 
 
-def _cluster_separation(centers) -> float:  # noqa: ANN001
+def _cluster_separation(centers) -> float:
     import numpy as np
 
     if len(centers) < 2:
@@ -336,7 +336,7 @@ def _cluster_separation(centers) -> float:  # noqa: ANN001
     return minimum if minimum != float("inf") else 0.0
 
 
-def _labels_to_turns(times: Sequence[float], labels, *, min_turn_seconds: float) -> list[SpeakerTurn]:  # noqa: ANN001
+def _labels_to_turns(times: Sequence[float], labels, *, min_turn_seconds: float) -> list[SpeakerTurn]:
     turns: list[SpeakerTurn] = []
     if not len(times) or not len(labels):
         return turns

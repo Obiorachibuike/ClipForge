@@ -1,9 +1,6 @@
 """Project endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
-from sqlalchemy import func, select
-
 from app.api.deps import CurrentUser, DbSession, PageParams, owned_project
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -11,14 +8,12 @@ from app.models import (
     AnalysisKind,
     Clip,
     ClipCandidate,
-    JobStatus,
     JobType,
     Project,
     ProjectStatus,
     RenderJob,
     Transcript,
     TranscriptStatus,
-    User,
     Video,
     VideoAnalysis,
     VideoStatus,
@@ -26,6 +21,7 @@ from app.models import (
 )
 from app.schemas.common import OkResponse, Page
 from app.schemas.media import (
+    DiscoverRequest,
     JobOut,
     ProjectCreate,
     ProjectOut,
@@ -34,9 +30,10 @@ from app.schemas.media import (
     TranscriptOut,
     VideoOut,
 )
-from app.services import events as ev
 from app.services.job_service import JobService
 from app.services.storage import get_storage
+from fastapi import APIRouter, Query, status
+from sqlalchemy import func, select
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/projects", tags=["Projects"])
@@ -142,8 +139,17 @@ def restore_project(project_id: str, db: DbSession, user: CurrentUser) -> Projec
 
 
 @router.post("/{project_id}/discover", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def discover_clips(project_id: str, db: DbSession, user: CurrentUser, body: dict | None = None) -> JobOut:
-    """Queue the clip discovery pipeline for this project."""
+def discover_clips(
+    project_id: str,
+    db: DbSession,
+    user: CurrentUser,
+    body: DiscoverRequest | None = None,
+) -> JobOut:
+    """Queue the clip discovery pipeline for this project.
+
+    Clip count and duration bounds are validated here; the worker re-clamps them
+    so a retried or hand-written job payload cannot exceed the same limits.
+    """
     project = owned_project(db, user, project_id)
     video = db.execute(
         select(Video).where(Video.project_id == project.id).order_by(Video.created_at.desc())
@@ -164,7 +170,14 @@ def discover_clips(project_id: str, db: DbSession, user: CurrentUser, body: dict
     if any(job.type == JobType.PROJECT_DISCOVER_CLIPS.value for job in active_jobs):
         raise ConflictError("Clip discovery is already running for this project.", code="discovery_running")
 
-    payload = {"project_id": project.id, "video_id": video.id, **(body or {})}
+    options = body or DiscoverRequest()
+    payload = {
+        "project_id": project.id,
+        "video_id": video.id,
+        "max_candidates": options.max_candidates,
+        "min_duration": options.min_duration,
+        "max_duration": options.max_duration,
+    }
     project.status = ProjectStatus.PROCESSING.value
     db.commit()
     job = JobService.create(

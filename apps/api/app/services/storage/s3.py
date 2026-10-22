@@ -6,7 +6,12 @@ from pathlib import Path
 
 from app.core.errors import StorageError
 from app.core.logging import get_logger
-from app.services.storage.base import ObjectInfo, RangeSpec, StorageBackend, validate_key
+from app.services.storage.base import (
+    ObjectInfo,
+    RangeSpec,
+    StorageBackend,
+    validate_key,
+)
 
 log = get_logger(__name__)
 CHUNK = 1024 * 1024
@@ -34,6 +39,8 @@ class S3Storage(StorageBackend):
         if not bucket:
             raise StorageError("S3_BUCKET is not configured.")
         self.bucket = bucket
+        self.region = region
+        self.endpoint = endpoint
         self.prefix = prefix.strip("/")
         self.public_base_url = public_base_url.rstrip("/")
         self.signed_url_ttl = signed_url_ttl
@@ -62,11 +69,8 @@ class S3Storage(StorageBackend):
         Used by ``storage_backend=auto``: a configured bucket name must not make
         the app pick a backend it cannot use.
         """
-        from botocore.config import Config as BotoConfig
-
         try:
-            probe = self.client.meta.client if hasattr(self.client, "meta") else self.client
-            probe.head_bucket(Bucket=self.bucket)
+            self.client.head_bucket(Bucket=self.bucket)
             return True, ""
         except Exception as exc:
             return False, f"{type(exc).__name__}: {str(exc)[:160]}"
@@ -74,12 +78,22 @@ class S3Storage(StorageBackend):
     def ensure_bucket(self) -> None:
         try:
             self.client.head_bucket(Bucket=self.bucket)
+            return
         except Exception:
-            try:
+            pass
+        try:
+            # AWS requires an explicit location for every region except
+            # us-east-1; S3-compatible providers (MinIO/R2) reject it.
+            if self.region and self.region != "us-east-1" and not self.endpoint:
+                self.client.create_bucket(
+                    Bucket=self.bucket,
+                    CreateBucketConfiguration={"LocationConstraint": self.region},
+                )
+            else:
                 self.client.create_bucket(Bucket=self.bucket)
-                log.info("storage.bucket_created", bucket=self.bucket)
-            except Exception as exc:  # pragma: no cover
-                log.warning("storage.bucket_unavailable", bucket=self.bucket, error=str(exc))
+            log.info("storage.bucket_created", bucket=self.bucket)
+        except Exception as exc:  # pragma: no cover
+            log.warning("storage.bucket_unavailable", bucket=self.bucket, error=str(exc))
 
     # ---------------------------------------------------------- interface ---
     def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> ObjectInfo:

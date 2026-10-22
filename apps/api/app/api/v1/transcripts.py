@@ -1,37 +1,31 @@
 """Transcript endpoints: read, search, edit words, and window queries."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
-from sqlalchemy import select
-
-from app.api.deps import CurrentUser, DbSession, owned_clip, owned_video
+from app.api.deps import CurrentUser, DbSession, owned_video
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models import (
-    CandidateStatus,
-    ClipCandidate,
     JobType,
     Project,
-    ProjectStatus,
     Transcript,
     TranscriptSegment,
     TranscriptStatus,
     TranscriptWord,
     User,
     Video,
-    VideoStatus,
 )
 from app.schemas.common import OkResponse
 from app.schemas.media import (
     JobOut,
     TranscriptDetail,
-    TranscriptOut,
     TranscriptSegmentOut,
     TranscriptWindow,
     TranscriptWordOut,
     WordEdit,
 )
 from app.services.job_service import JobService
+from fastapi import APIRouter, Query
+from sqlalchemy import select
 
 log = get_logger(__name__)
 router = APIRouter(tags=["Transcripts"])

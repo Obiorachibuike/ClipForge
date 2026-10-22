@@ -4,9 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
 from app.schemas.common import ORMModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------- projects ---
@@ -52,8 +51,8 @@ class ProjectSummary(ProjectOut):
     candidate_count: int = 0
     render_count: int = 0
     total_duration_seconds: float = 0.0
-    latest_video: "VideoOut | None" = None
-    active_jobs: list["JobOut"] = Field(default_factory=list)
+    latest_video: VideoOut | None = None
+    active_jobs: list[JobOut] = Field(default_factory=list)
     progress: float = 0.0
     stage: str = ""
 
@@ -130,6 +129,25 @@ class UploadInitRequest(BaseModel):
     project_name: str | None = Field(default=None, max_length=160)
 
 
+class DiscoverRequest(BaseModel):
+    """Clip-discovery controls. Bounds are enforced again in the worker.
+
+    The values shape a CPU-bounded search, so they are validated here rather
+    than trusted from the request body (the discovery endpoint used to accept an
+    arbitrary dict).
+    """
+
+    max_candidates: int = Field(default=12, ge=1, le=30)
+    min_duration: float = Field(default=10.0, ge=3.0, le=180.0)
+    max_duration: float = Field(default=95.0, ge=5.0, le=300.0)
+
+    @model_validator(mode="after")
+    def _ordered_durations(self) -> DiscoverRequest:
+        if self.min_duration >= self.max_duration:
+            raise ValueError("The minimum clip duration must be shorter than the maximum.")
+        return self
+
+
 class RemoteVideoImportRequest(BaseModel):
     """A public video page to download through the worker.
 
@@ -175,7 +193,7 @@ class UploadStatusResponse(BaseModel):
 
 class UploadCompleteResponse(BaseModel):
     video: VideoOut
-    job: "JobOut"
+    job: JobOut
     message: str = "Upload complete. Processing has started."
 
 

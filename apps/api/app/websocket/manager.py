@@ -14,12 +14,16 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from app.core.logging import get_logger
+from app.services.events import (
+    Event,
+    job_channel,
+    project_channel,
+    user_channel,
+)
+from app.services.job_service import JobService
 from fastapi import WebSocket
 from sqlalchemy.orm import Session
-
-from app.core.logging import get_logger
-from app.services.events import Event, get_event_bus, job_channel, project_channel, user_channel
-from app.services.job_service import JobService
 
 log = get_logger(__name__)
 

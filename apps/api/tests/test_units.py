@@ -10,7 +10,6 @@ import math
 import re
 
 import pytest
-
 from app.services.ai.types import WordTiming
 from app.services.pipeline import analyzer
 
@@ -260,6 +259,7 @@ def test_escape_filter_path_removes_filter_delimiters():
 
 
 def test_safe_output_path_refuses_to_escape_the_root(tmp_path):
+    from app.core.errors import MediaError
     from app.services.media.ffmpeg import safe_output_path
 
     root = tmp_path / "root"
@@ -267,17 +267,18 @@ def test_safe_output_path_refuses_to_escape_the_root(tmp_path):
     inside = safe_output_path(root / "sub" / "out.mp4", root)
     assert str(inside).startswith(str(root.resolve()))
 
-    with pytest.raises(Exception):
+    with pytest.raises(MediaError):
         safe_output_path(root / ".." / ".." / "etc" / "out.mp4", root)
 
 
 def test_numeric_guards_reject_injection_strings():
+    from app.core.errors import MediaError
     from app.services.media.ffmpeg import num
 
     assert num(1) == "1"
-    with pytest.raises(Exception):
+    with pytest.raises(MediaError):
         num("1; rm -rf /")
-    with pytest.raises(Exception):
+    with pytest.raises(MediaError):
         num("nan")
 
 
@@ -296,6 +297,7 @@ def test_password_hash_round_trip():
 
 
 def test_session_token_round_trip_and_tamper_detection():
+    from app.core.errors import AuthError
     from app.core.security import create_session_token, decode_session_token
 
     token = create_session_token("user-1", "session-1")
@@ -304,7 +306,7 @@ def test_session_token_round_trip_and_tamper_detection():
     assert claims["sid"] == "session-1"
     assert claims["typ"] == "session"
 
-    with pytest.raises(Exception):
+    with pytest.raises(AuthError):
         decode_session_token(token + "tampered")
 
 

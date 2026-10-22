@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from app.core.logging import get_logger
 from app.services.ai.types import MomentAnalysis, WordTiming
@@ -511,7 +512,6 @@ def generate_candidates(
         return []
     raw: list[Candidate] = []
     count = len(sentences)
-    existing_vectors: list[list[float]] = []
 
     for start_index in range(count):
         for end_index in range(start_index, count):
@@ -623,10 +623,7 @@ def extractive_title(candidate: Candidate) -> str:
         if len(title) + len(word) + 1 > 62:
             break
         title = f"{title} {word}".strip()
-    title = title.rstrip(" ,;:-")
-    if title and title[-1] not in ".!?":
-        title = title
-    return title[:70]
+    return title.rstrip(" ,;:-")[:70]
 
 
 def extractive_hook(candidate: Candidate) -> str:

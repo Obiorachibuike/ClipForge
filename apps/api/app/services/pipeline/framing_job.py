@@ -1,10 +1,6 @@
 """Framing analysis job: detect faces / subjects and plan the vertical crop."""
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
 from app.core.errors import MediaError, NotFoundError
 from app.core.logging import get_logger
 from app.models import AnalysisKind, Job, Project, Video, VideoAnalysis
@@ -14,6 +10,8 @@ from app.services.media.framing import analyze_video
 from app.services.media.vision import build_detector
 from app.services.pipeline.workspace import workspace_for
 from app.services.storage import get_storage
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

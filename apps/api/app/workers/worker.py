@@ -15,8 +15,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.db import get_session_factory, init_engine_if_needed
 from app.core.errors import AppError, CancelledError_
@@ -27,6 +25,7 @@ from app.services.job_service import JobService
 from app.services.queue import get_queue
 from app.services.runtime import registry
 from app.workers.handlers import handler_for
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -40,13 +39,14 @@ class Worker:
         self._running: set[str] = set()
         self._running_lock = threading.Lock()
         self._heartbeat_thread: threading.Thread | None = None
+        self._last_reconcile = 0.0
         self.queue = get_queue()
 
     # ------------------------------------------------------------- control ---
     def start(self) -> None:
         configure_logging()
         log.info("worker.starting", worker_id=self.worker_id, concurrency=self.concurrency, queue=self.queue.backend_name())
-        self._recover()
+        self._reconcile(force=True)
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, name="worker-heartbeat", daemon=True)
         self._heartbeat_thread.start()
         try:
@@ -55,7 +55,7 @@ class Worker:
             self.shutdown()
 
     def install_signal_handlers(self) -> None:
-        def _handler(signum, _frame):  # noqa: ANN001
+        def _handler(signum, _frame):
             log.info("worker.signal", signal=signum)
             self._stop.set()
 
@@ -74,6 +74,7 @@ class Worker:
     # ---------------------------------------------------------------- loop ---
     def run_forever(self) -> None:
         while not self._stop.is_set():
+            self._reconcile()
             with self._running_lock:
                 capacity = self.concurrency - len(self._running)
             if capacity <= 0:
@@ -143,23 +144,43 @@ class Worker:
             if exc.retryable and JobService.schedule_retry(db, job, exc):
                 return
             JobService.mark_failed(db, job, exc)
-        except Exception as exc:  # noqa: BLE001 - convert to a safe failure
-            log.exception("worker.job_crashed", job_id=job.id, type=job.type)
+        except Exception as exc:
+            log.exception("worker.job_crashed", job_id=job.id, type=job.type, error=str(exc)[:500])
             if JobService.schedule_retry(db, job, AppError("Processing failed.", code="internal_error")):
                 return
             JobService.mark_failed(db, job, AppError("Processing failed. Our team has the details.", code="internal_error"))
 
     # ------------------------------------------------------------ recovery ---
-    def _recover(self) -> None:
-        """Requeue jobs interrupted by a previous crash/restart."""
+    def _reconcile(self, *, force: bool = False) -> None:
+        """Requeue work stranded by a crash, on startup and periodically.
+
+        Runs at most once per `WORKER_RECONCILE_SECONDS` in the claim loop.
+        `active_ids` keeps this process's own in-flight jobs out of the stale
+        candidate set; queue heartbeats protect jobs running in other processes.
+        """
+        interval = float(settings.worker_reconcile_seconds or 0.0)
+        now = time.time()
+        if not force:
+            if interval <= 0:
+                return
+            if now - self._last_reconcile < interval:
+                return
+        self._last_reconcile = now
+        with self._running_lock:
+            active_ids = set(self._running)
         db = get_session_factory()()
         try:
-            recovered = JobService.recover_stale(db)
+            recovered = JobService.recover_stale(db, active_ids=active_ids)
             queued = JobService.recover_unqueued(db)
             if recovered or queued:
-                log.info("worker.recovered_jobs", stale=recovered, unqueued=queued)
-        except Exception as exc:  # pragma: no cover
-            log.warning("worker.recovery_failed", error=str(exc))
+                log.info(
+                    "worker.recovered_jobs",
+                    stale=recovered,
+                    unqueued=queued,
+                    periodic=not force,
+                )
+        except Exception as exc:  # pragma: no cover - never kill the worker loop
+            log.warning("worker.recovery_failed", error=str(exc)[:300])
         finally:
             db.close()
 

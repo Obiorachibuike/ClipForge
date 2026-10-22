@@ -92,7 +92,19 @@ def verify_environment() -> dict:
     return result
 
 
+def enforce_production_configuration() -> None:
+    """Fail closed on insecure production secrets before serving any request."""
+    errors = settings.production_config_errors()
+    if errors:
+        raise RuntimeError(
+            "Refusing to start with an insecure production configuration: " + " ".join(errors)
+        )
+    for warning in settings.production_config_warnings():
+        log.warning("bootstrap.config_warning", detail=warning)
+
+
 def bootstrap(seed: bool = True) -> dict:
+    enforce_production_configuration()
     prepare_directories()
     if seed:
         seed_system_data()

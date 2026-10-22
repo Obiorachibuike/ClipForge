@@ -159,7 +159,9 @@ def probe_media(path: Path) -> dict[str, Any] | None:
     payload = result.data.get("data") if isinstance(result.data.get("data"), dict) else result.data
     if not isinstance(payload, dict) or (not payload.get("duration") and not payload.get("streams")):
         return None
-    from app.services.media.ffmpeg import normalize_probe  # local: keeps this module lightweight
+    from app.services.media.ffmpeg import (
+        normalize_probe,  # local: keeps this module lightweight
+    )
 
     normalized = normalize_probe(payload)
     if normalized["duration"] <= 0:

@@ -237,7 +237,6 @@ class SaliencyAnalyzer:
         cv2 = self.cv2
         if cv2 is None:
             return 0.5, 0.45, 0.0
-        height, width = frame_bgr.shape[:2]
         try:
             if self.spectral is not None:
                 success, saliency_map = self.spectral.computeSaliency(frame_bgr)

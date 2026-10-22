@@ -11,9 +11,7 @@ import json
 import re
 from pathlib import Path
 
-import pytest
 import yaml
-
 from app.core.config import Settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -175,6 +173,16 @@ def test_nginx_keeps_the_spa_fallback_and_websocket_upgrade():
     config = (REPO_ROOT / "apps" / "web" / "nginx.conf").read_text()
     assert "try_files $uri $uri/ /index.html;" in config, "client-side routes would 404"
     assert "proxy_set_header Upgrade    $http_upgrade;" in config
+
+
+def test_api_image_can_run_the_migrations_it_deploys():
+    dockerfile = (REPO_ROOT / "infrastructure" / "Dockerfile.api").read_text()
+    assert "COPY alembic.ini /srv/app/alembic.ini" in dockerfile
+    assert "COPY alembic /srv/app/alembic" in dockerfile
+    assert (REPO_ROOT / "alembic.ini").is_file()
+    versions = sorted((REPO_ROOT / "alembic" / "versions").glob("*.py"))
+    assert versions, "no Alembic revisions are committed"
+    assert "alembic" in (REPO_ROOT / "apps" / "api" / "requirements.txt").read_text().lower()
 
 
 def test_api_image_installs_media_tooling_the_pipeline_requires():

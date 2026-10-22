@@ -4,9 +4,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
+from app.core.config import settings
 from app.core.errors import MediaError, NotFoundError
 from app.core.logging import get_logger
 from app.models import Job, Project, ProjectStatus, UploadSession, Video, VideoStatus
@@ -16,6 +14,8 @@ from app.services.pipeline.workspace import workspace_for
 from app.services.processor import sidecar
 from app.services.storage import get_storage, safe_filename
 from app.services.upload_service import upload_part_key
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 CHECKSUM_SAMPLE_BYTES = 256 * 1024 * 1024
@@ -155,6 +155,12 @@ def run_probe(db: Session, job: Job) -> dict:
         probe = sidecar.probe_media(local) or ffmpeg.probe_media(local)
         if probe["duration"] <= 0:
             raise MediaError("This file reports no duration and cannot be processed.", code="invalid_media")
+        if not settings.duration_within_limit(probe["duration"]):
+            minutes = max(1, int(settings.media_max_duration_seconds // 60))
+            video.status = VideoStatus.FAILED.value
+            video.error_message = f"This video is longer than the {minutes}-minute limit for this deployment."
+            db.commit()
+            raise MediaError(video.error_message, code="video_too_long")
 
         video.duration_seconds = float(probe["duration"])
         video.width = int(probe["width"])

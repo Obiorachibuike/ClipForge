@@ -11,7 +11,7 @@ from typing import Any
 
 from app.services.ai.registry import available_providers, vision_capability
 
-__all__ = ["available_providers", "vision_capability", "media_capability"]
+__all__ = ["available_providers", "media_capability", "vision_capability"]
 
 
 def media_capability(settings_obj: Any = None) -> dict[str, Any]:

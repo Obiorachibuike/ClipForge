@@ -9,9 +9,10 @@ timestamps.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 # --------------------------------------------------------------- presets ---
 # Each preset is a complete caption configuration. `animation` selects how the
@@ -232,8 +233,7 @@ def available_fonts() -> list[str]:
         for path in list(root.rglob("*.ttf"))[:400] + list(root.rglob("*.otf"))[:200]:
             name = path.stem
             for suffix in ("-Bold", "-Italic", "-BoldItalic", "-Regular", "-Light", "-Medium", "-SemiBold"):
-                if name.endswith(suffix):
-                    name = name[: -len(suffix)]
+                name = name.removesuffix(suffix)
             families.add(name.replace("_", " ").strip())
     return sorted(family for family in families if family)
 
@@ -390,8 +390,7 @@ def _clamp_float(value: Any, minimum: float, maximum: float, default: float) -> 
 def _color(value: Any, default: str) -> str:
     """Normalize to #RRGGBB, accepting #abc / abc / #aabbcc."""
     text = str(value or "").strip()
-    if text.startswith("#"):
-        text = text[1:]
+    text = text.removeprefix("#")
     if re.fullmatch(r"[0-9a-fA-F]{3}", text):
         text = "".join(ch * 2 for ch in text)
     if re.fullmatch(r"[0-9a-fA-F]{6}", text):
@@ -675,9 +674,11 @@ class AssBuilder:
             "YCbCr Matrix: TV.709",
             "",
             "[V4+ Styles]",
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-            "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-            "Alignment, MarginL, MarginR, MarginV, Encoding",
+            (
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+                "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+                "Alignment, MarginL, MarginR, MarginV, Encoding"
+            ),
         ]
         header.extend(style for _, style in self.styles)
         header.extend(["", "[Events]"])

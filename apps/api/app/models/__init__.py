@@ -8,7 +8,15 @@ from app.models.account import (
     Subscription,
     User,
 )
-from app.models.base import Base, JSONColumn, TimestampMixin, UUIDMixin, as_utc, new_id, utcnow
+from app.models.base import (
+    Base,
+    JSONColumn,
+    TimestampMixin,
+    UUIDMixin,
+    as_utc,
+    new_id,
+    utcnow,
+)
 from app.models.clip import CaptionStyle, Clip, ClipCandidate
 from app.models.enums import (
     AIProviderKind,
@@ -41,9 +49,8 @@ __all__ = [
     "AIProviderName",
     "AnalysisKind",
     "Base",
-    "as_utc",
-    "CaptionStyle",
     "CandidateStatus",
+    "CaptionStyle",
     "Clip",
     "ClipCandidate",
     "ClipStatus",
@@ -80,6 +87,7 @@ __all__ = [
     "Video",
     "VideoAnalysis",
     "VideoStatus",
+    "as_utc",
     "new_id",
     "utcnow",
 ]

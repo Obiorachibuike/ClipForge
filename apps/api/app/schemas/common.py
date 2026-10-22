@@ -20,7 +20,7 @@ class Page(BaseModel, Generic[T]):
     has_more: bool = False
 
     @classmethod
-    def build(cls, items: list[T], total: int, limit: int, offset: int) -> "Page[T]":
+    def build(cls, items: list[T], total: int, limit: int, offset: int) -> Page[T]:
         return cls(items=items, total=total, limit=limit, offset=offset, has_more=offset + len(items) < total)
 
 

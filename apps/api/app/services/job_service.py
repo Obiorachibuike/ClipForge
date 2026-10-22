@@ -9,16 +9,15 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.errors import AppError, CancelledError_, NotFoundError, user_message
 from app.core.logging import get_logger
-from app.models import Job, JobStatus, as_utc, utcnow
+from app.models import Job, JobStatus, as_utc
 from app.services import events as ev
 from app.services.queue import get_queue
 from app.services.runtime import registry
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -362,23 +361,46 @@ class JobService:
         return enqueued
 
     @staticmethod
-    def recover_stale(db: Session, older_than_minutes: int | None = None) -> int:
-        """Requeue or fail jobs left running by a crashed worker."""
+    def recover_stale(
+        db: Session,
+        older_than_minutes: int | None = None,
+        *,
+        active_ids: set[str] | None = None,
+    ) -> int:
+        """Requeue or fail jobs left running by a crashed worker.
+
+        A job is only treated as abandoned when its database start time is older
+        than the timeout *and* the queue has no fresh heartbeat for it. That
+        second condition is what makes a periodic reconciliation pass safe while
+        a genuinely long render is still running.
+        """
         threshold = _now() - timedelta(minutes=older_than_minutes or settings.worker_job_timeout_minutes)
         stmt = select(Job).where(
             Job.status.in_([JobStatus.RUNNING.value, JobStatus.RETRYING.value]),
             or_(Job.started_at.is_(None), Job.started_at < threshold),
         )
+        queue = get_queue()
+        try:
+            heartbeats = queue.active_since()
+        except Exception as exc:  # pragma: no cover - queue hiccup
+            log.warning("job.recovery_heartbeat_unavailable", error=str(exc)[:200])
+            heartbeats = {}
+        threshold_epoch = threshold.timestamp()
         requeued = 0
         for job in db.execute(stmt).scalars():
             if job.status == JobStatus.RETRYING.value:
+                continue
+            if active_ids and job.id in active_ids:
+                continue
+            if heartbeats.get(job.id, 0.0) >= threshold_epoch:
+                # A live worker is still reporting on this job.
                 continue
             if int(job.attempts or 0) < int(job.max_attempts or 1):
                 job.status = JobStatus.QUEUED.value
                 job.stage = "queued"
                 job.message = "Recovered after worker restart"
                 db.commit()
-                get_queue().enqueue(job.id, priority=job.priority)
+                queue.enqueue(job.id, priority=job.priority)
                 requeued += 1
                 log.warning("job.recovered", job_id=job.id, type=job.type)
             else:

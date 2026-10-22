@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy import select
-
 from app.api.deps import CurrentUser, DbSession, OptionalUser, require_admin
 from app.core.config import settings
 from app.core.errors import NotFoundError, ValidationError
@@ -27,6 +24,8 @@ from app.services.billing.subscription_service import SubscriptionService
 from app.services.queue import get_queue
 from app.services.storage import get_storage
 from app.services.usage_service import UsageService
+from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy import select
 
 log = get_logger(__name__)
 router = APIRouter(tags=["Account"])
@@ -195,7 +194,6 @@ def delete_ai_provider(provider_id: str, db: DbSession, user: CurrentUser) -> Ok
 @router.post("/settings/ai-providers/{provider_id}/test")
 def test_ai_provider(provider_id: str, db: DbSession, user: CurrentUser) -> dict:
     """Perform a real call so the user knows whether their key works."""
-    from app.services.ai.llm.base import BaseLLMProvider
 
     row = db.get(AIProviderConfig, provider_id)
     if row is None or row.user_id != user.id:

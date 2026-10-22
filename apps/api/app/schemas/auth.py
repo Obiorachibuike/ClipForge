@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
-
 from app.core.security import password_strength_error
 from app.schemas.common import ORMModel
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class Credentials(BaseModel):

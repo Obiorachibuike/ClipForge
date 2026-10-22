@@ -34,26 +34,26 @@ def as_utc(value: datetime) -> datetime:
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {dict: JSONColumn}
+    type_annotation_map = {dict: JSONColumn}  # noqa: RUF012 - read by SQLAlchemy
 
 
 class UUIDMixin:
     @declared_attr
-    def id(cls) -> Mapped[str]:  # noqa: N805
+    def id(cls) -> Mapped[str]:
         return mapped_column(String(32), primary_key=True, default=new_id)
 
 
 class TimestampMixin:
     @declared_attr
-    def created_at(cls) -> Mapped[datetime]:  # noqa: N805
+    def created_at(cls) -> Mapped[datetime]:
         return mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     @declared_attr
-    def updated_at(cls) -> Mapped[datetime]:  # noqa: N805
+    def updated_at(cls) -> Mapped[datetime]:
         return mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class UserOwnedMixin:
     @declared_attr
-    def user_id(cls) -> Mapped[str]:  # noqa: N805
+    def user_id(cls) -> Mapped[str]:
         return mapped_column(String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)

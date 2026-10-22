@@ -6,14 +6,19 @@ that expose the OpenAI schema, and any custom gateway.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderUnavailableError
 from app.core.logging import get_logger
 from app.services.ai.http import request_json
-from app.services.ai.types import ProviderInfo, SegmentTiming, TranscriptionResult, WordTiming
+from app.services.ai.types import (
+    ProviderInfo,
+    SegmentTiming,
+    TranscriptionResult,
+    WordTiming,
+)
 
 log = get_logger(__name__)
 

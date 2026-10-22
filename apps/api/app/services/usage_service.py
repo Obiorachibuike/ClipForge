@@ -1,17 +1,16 @@
 """Usage accounting and quota enforcement."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
-
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 from app.core.errors import QuotaExceededError
 from app.core.logging import get_logger
-from app.models import Plan, UsageCounter, UsageRecord, User, utcnow
+from app.models import UsageCounter, UsageRecord, User, utcnow
 from app.services import events as ev
 from app.services.billing.plans import limit_for, plan_for
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

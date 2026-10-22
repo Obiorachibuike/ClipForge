@@ -3,13 +3,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.core.errors import NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.models import CaptionStyle, Clip, Transcript, TranscriptStatus, TranscriptWord, User
+from app.models import (
+    CaptionStyle,
+    Clip,
+    Transcript,
+    TranscriptStatus,
+    TranscriptWord,
+    User,
+)
 from app.services.media.ass import CAPTION_PRESETS, CaptionConfig, caption_cues
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 

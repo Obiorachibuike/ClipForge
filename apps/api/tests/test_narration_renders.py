@@ -67,9 +67,8 @@ def test_clearing_the_script_sets_the_flag_back(auth_api):
 
 def test_script_change_supersedes_a_completed_transcript(auth_api, db):
     """Stale word timings must never keep presenting as current."""
-    from sqlalchemy import select
-
     from app.models import Transcript, TranscriptStatus, Video, utcnow
+    from sqlalchemy import select
 
     _, video_id = _project_and_video(auth_api)
     video = db.get(Video, video_id)
@@ -113,7 +112,14 @@ def test_script_is_length_limited_and_owner_scoped(auth_api, anon_api, second_ap
 
 
 def test_render_download_serves_real_bytes_and_ranges(auth_api, second_api, db, tmp_path):
-    from app.models import Clip, ClipStatus, Project, RenderJob, RenderStatus, Video, utcnow
+    from app.models import (
+        Clip,
+        ClipStatus,
+        RenderJob,
+        RenderStatus,
+        Video,
+        utcnow,
+    )
     from app.services.storage import get_storage
 
     project_id, video_id = _project_and_video(auth_api)
@@ -233,9 +239,8 @@ def test_render_download_reports_a_missing_file(auth_api, db):
 
 def test_video_out_reports_the_script_flag_without_the_text(auth_api, db):
     """The list endpoint stays small even with a long script stored."""
-    from sqlalchemy import select
-
     from app.models import Video
+    from sqlalchemy import select
 
     _, video_id = _project_and_video(auth_api)
     auth_api.patch(f"/api/v1/videos/{video_id}", json={"narration_script": "word " * 4000})
@@ -259,7 +264,14 @@ def test_video_transcript_route_returns_words(auth_api, db):
     SQLAlchemy's `.limit()`. It is the endpoint the project page reads, so the
     failure was total rather than cosmetic.
     """
-    from app.models import Transcript, TranscriptSegment, TranscriptStatus, TranscriptWord, Video, utcnow
+    from app.models import (
+        Transcript,
+        TranscriptSegment,
+        TranscriptStatus,
+        TranscriptWord,
+        Video,
+        utcnow,
+    )
 
     _, video_id = _project_and_video(auth_api)
     video = db.get(Video, video_id)

@@ -14,9 +14,6 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -40,6 +37,8 @@ from app.services.job_service import JobService
 from app.services.queue import get_queue
 from app.services.storage import RangeSpec, get_storage, safe_filename
 from app.services.usage_service import UsageService
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 log = get_logger(__name__)
 
@@ -186,6 +185,7 @@ class UploadService:
         session = UploadService._session(db, user, upload_id)
         if session.status in (UploadStatus.COMPLETED.value, UploadStatus.ABORTED.value):
             raise ConflictError("This upload can no longer be modified.", code="upload_closed")
+        _require_not_expired(session)
         if index < 0 or index >= session.total_chunks:
             raise ValidationError(f"Chunk index {index} is out of range.", field="index")
         if len(data) == 0:
@@ -233,7 +233,7 @@ class UploadService:
         db: Session,
         user: User,
         upload_id: str,
-        source,  # noqa: ANN001 - binary file-like object
+        source,
         *,
         max_bytes: int | None = None,
         chunk_bytes: int = 1024 * 1024,
@@ -245,6 +245,7 @@ class UploadService:
         session = UploadService._session(db, user, upload_id)
         if session.status in (UploadStatus.COMPLETED.value, UploadStatus.ABORTED.value):
             raise ConflictError("This upload can no longer be modified.", code="upload_closed")
+        _require_not_expired(session)
         ceiling = min(max_bytes or settings.media_max_upload_bytes, settings.media_max_upload_bytes)
         path = _staging_path(upload_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,7 +313,7 @@ class UploadService:
 
     # ------------------------------------------------------------ complete ---
     @staticmethod
-    def complete_upload(db: Session, user: User, upload_id: str) -> tuple[Video, UploadSession, "object"]:
+    def complete_upload(db: Session, user: User, upload_id: str) -> tuple[Video, UploadSession, object]:
         session = UploadService._session(db, user, upload_id, for_update=True)
         video = db.get(Video, session.video_id) if session.video_id else None
         if video is None:
@@ -359,6 +360,9 @@ class UploadService:
             _ensure_job_enqueued(job)
             return video, session, job
 
+        # A completed upload stays idempotently retrievable for its probe job,
+        # but an unfinished session past its TTL may not be completed.
+        _require_not_expired(session)
         received = dict(session.received_chunks or {})
         missing = [index for index in range(session.total_chunks) if str(index) not in received]
         if missing:
@@ -517,6 +521,15 @@ def _ensure_job_enqueued(job: Job) -> None:
         return
     delay = max(0.0, (as_utc(job.run_after) - utcnow()).total_seconds()) if job.run_after else 0.0
     queue.enqueue(job.id, priority=job.priority, delay_seconds=delay)
+
+
+def _require_not_expired(session: UploadSession) -> None:
+    """Reject writes to an upload session past its TTL."""
+    if session.expires_at is not None and as_utc(session.expires_at) < utcnow():
+        raise ConflictError(
+            "This upload session has expired. Start the upload again.",
+            code="upload_expired",
+        )
 
 
 def upload_part_key(session: UploadSession, index: int) -> str:

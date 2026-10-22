@@ -14,15 +14,21 @@ jittery "random camera movement" that naive per-frame cropping produces.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from app.core.config import settings
 from app.core.errors import MediaError
 from app.core.logging import get_logger
 from app.services.media import ffmpeg
-from app.services.media.vision import FaceBox, FaceDetector, SaliencyAnalyzer, build_detector
+from app.services.media.vision import (
+    FaceBox,
+    FaceDetector,
+    SaliencyAnalyzer,
+    build_detector,
+)
 
 log = get_logger(__name__)
 

@@ -7,14 +7,26 @@ own rather than injected as filter strings from user input.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from app.core.config import settings
 from app.core.errors import MediaError
-from app.services.media.ass import CaptionConfig, CaptionWord, HeadlineSpec, build_ass_document
-from app.services.media.ffmpeg import choice, escape_expression, escape_filter_path, intnum, num
-from app.services.media.framing import ASPECTS, crop_expression, static_crop_for
+from app.services.media.ass import (
+    CaptionConfig,
+    CaptionWord,
+    HeadlineSpec,
+    build_ass_document,
+)
+from app.services.media.ffmpeg import (
+    choice,
+    escape_expression,
+    escape_filter_path,
+    intnum,
+    num,
+)
+from app.services.media.framing import crop_expression, static_crop_for
 
 # Platform presets: every one of these is a real, rendered output specification.
 RENDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -428,8 +440,7 @@ def _double_bitrate(bitrate: str) -> str:
 
 def _hex(value: Any, default: str) -> str:
     text = str(value or "").strip()
-    if text.startswith("#"):
-        text = text[1:]
+    text = text.removeprefix("#")
     if len(text) in (3, 6) and all(ch in "0123456789abcdefABCDEF" for ch in text):
         return f"0x{text}" if len(text) == 6 else f"0x{''.join(ch * 2 for ch in text)}"
     return default

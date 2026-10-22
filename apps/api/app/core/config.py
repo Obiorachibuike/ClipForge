@@ -17,6 +17,8 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_DEV_SECRET = "dev-only-insecure-secret-change-me"
+MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -36,7 +38,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
 
     # ------------------------------------------------------------ security ---
-    secret_key: str = Field(default="dev-only-insecure-secret-change-me")
+    secret_key: str = Field(default=DEFAULT_DEV_SECRET)
     jwt_secret: str = Field(default="")
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60 * 24 * 7  # session cookie lifetime (7d)
@@ -71,6 +73,9 @@ class Settings(BaseSettings):
     worker_max_attempts: int = 3
     worker_backoff_seconds: float = 5.0
     worker_job_timeout_minutes: int = 90
+    # How often a running worker reconciles persisted jobs with the queue
+    # (0 disables the periodic pass; startup reconciliation always runs).
+    worker_reconcile_seconds: float = 60.0
     render_concurrency: int = 1
     heartbeat_seconds: float = 1.5
 
@@ -96,6 +101,10 @@ class Settings(BaseSettings):
     media_allowed_extensions: str = "mp4,mov,mkv,webm,m4v,avi,mp3,m4a,wav,flac,ogg,ts"
     media_allowed_mime_prefixes: str = "video/,audio/"
     media_probe_timeout_seconds: int = 120
+    # Source-duration ceiling (seconds). 0 disables the check. Media longer than
+    # this is rejected at probe time and never enters transcription/rendering;
+    # URL imports also ask the downloader to skip it before downloading.
+    media_max_duration_seconds: int = 4 * 60 * 60
     media_frame_sample_fps: float = 2.0
     media_max_analysis_frames: int = 900
     # Keep each request under Vercel's function request-body limit; clients use
@@ -156,6 +165,10 @@ class Settings(BaseSettings):
     api_url: str = "http://localhost:8000"
     websocket_url: str = ""  # derived from api_url when empty
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Optional regex for preview/ephemeral origins (exact CORS_ORIGINS entries are
+    # preferred). Empty by default: a wildcard preview domain must be an explicit
+    # deployment decision, never an implicit production setting.
+    cors_origin_regex: str = ""
 
     # ---------------------------------------------------------- rate limits ---
     rate_limit_enabled: bool = True
@@ -181,10 +194,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------- verticals ---
     @field_validator("jwt_secret", mode="after")
     @classmethod
-    def _fallback_jwt_secret(cls, v: str, info) -> str:  # noqa: ANN001
+    def _fallback_jwt_secret(cls, v: str, info) -> str:
         if v:
             return v
-        return info.data.get("secret_key", "dev-only-insecure-secret-change-me")
+        return info.data.get("secret_key", DEFAULT_DEV_SECRET)
 
     # ------------------------------------------------------------- helpers ---
     @property
@@ -195,6 +208,59 @@ class Settings(BaseSettings):
     def is_vercel(self) -> bool:
         """Vercel functions must never host the long-running media worker."""
         return os.getenv("VERCEL", "").strip().lower() in {"1", "true", "yes"}
+
+    def production_config_errors(self) -> list[str]:
+        """Reasons this process must refuse to start in production.
+
+        A known development secret means anyone can forge a session cookie for
+        any account, so production fails closed instead of logging a warning.
+        """
+        if not self.is_production:
+            return []
+        errors: list[str] = []
+        secret = (self.secret_key or "").strip()
+        jwt_secret = (self.jwt_secret or "").strip()
+        if not secret or secret == DEFAULT_DEV_SECRET:
+            errors.append("SECRET_KEY must be set to a random value in production.")
+        elif len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
+            errors.append(
+                f"SECRET_KEY must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters in production."
+            )
+        if not jwt_secret or jwt_secret == DEFAULT_DEV_SECRET:
+            errors.append("JWT_SECRET must be set to a random value in production.")
+        elif len(jwt_secret) < MIN_PRODUCTION_SECRET_LENGTH:
+            errors.append(
+                f"JWT_SECRET must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters in production."
+            )
+        return errors
+
+    def production_config_warnings(self) -> list[str]:
+        """Production settings that are dangerous but not startup-fatal."""
+        if not self.is_production:
+            return []
+        warnings: list[str] = []
+        if not self.cookie_secure:
+            warnings.append("COOKIE_SECURE is false: session cookies can travel over plain HTTP.")
+        if not (self.encryption_key or "").strip():
+            warnings.append(
+                "ENCRYPTION_KEY is empty: provider API keys are encrypted with a key derived "
+                "from SECRET_KEY. Set a dedicated ENCRYPTION_KEY."
+            )
+        if self.queue_backend == "memory":
+            warnings.append("QUEUE_BACKEND=memory is refused at queue creation time in production.")
+        if self.storage_backend == "local" and self.worker_external:
+            warnings.append("External workers cannot see local storage; use STORAGE_BACKEND=s3.")
+        return warnings
+
+    def duration_within_limit(self, seconds: float) -> bool:
+        limit = int(self.media_max_duration_seconds or 0)
+        if limit <= 0:
+            return True
+        try:
+            value = float(seconds)
+        except (TypeError, ValueError):
+            return True
+        return 0 < value <= limit
 
     @property
     def allowed_extensions(self) -> set[str]:
